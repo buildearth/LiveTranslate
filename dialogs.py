@@ -366,6 +366,10 @@ class ModelEditDialog(QDialog):
         layout.addRow(t("label_proxy"), self._proxy_mode)
         layout.addRow(t("label_proxy_url"), self._proxy_url)
         layout.addRow("", self._no_system_role)
+        hint = QLabel(t("no_system_role_hint"))
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #888; font-size: 11px;")
+        layout.addRow("", hint)
 
         if model_data:
             self._name.setText(model_data.get("name", ""))
