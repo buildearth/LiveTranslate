@@ -43,12 +43,7 @@ class ASREngine:
         return False
 
     def unload(self):
-        if self._model is not None:
-            try:
-                self._model.model.unload_model()
-            except Exception:
-                pass
-            self._model = None
+        self._model = None
 
     def transcribe(self, audio: np.ndarray) -> dict | None:
         """Transcribe audio segment.
