@@ -47,6 +47,7 @@ class AudioCapture:
         self._native_rate = 44100
         self._current_device_name = None
         self._lock = threading.Lock()
+        self._restart_event = threading.Event()
 
     def _get_wasapi_info(self):
         for i in range(self._pa.get_host_api_count()):
@@ -141,7 +142,7 @@ class AudioCapture:
         log.info(f"Audio device changed: {self._device_name} -> {device_name}")
         self._device_name = device_name
         if self._running:
-            self._restart_stream()
+            self._restart_event.set()
 
     def _restart_stream(self):
         """Restart stream with new default device."""
@@ -157,6 +158,23 @@ class AudioCapture:
         last_device_check = time.monotonic()
 
         while self._running:
+            # Handle pending restart request (from set_device on UI thread)
+            if self._restart_event.is_set():
+                self._restart_event.clear()
+                try:
+                    self._restart_stream()
+                    # Drain stale audio from old device
+                    while not self.audio_queue.empty():
+                        try:
+                            self.audio_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                    log.info(f"Audio capture restarted on: {self._current_device_name}")
+                except Exception as e:
+                    log.error(f"Restart after device change failed: {e}")
+                    time.sleep(0.5)
+                continue
+
             # Auto-switch only when using system default
             now = time.monotonic()
             if now - last_device_check > DEVICE_CHECK_INTERVAL:
@@ -176,11 +194,18 @@ class AudioCapture:
 
             native_chunk = int(self._native_rate * self.chunk_duration)
             try:
+                data = None
                 with self._lock:
                     if not self._stream:
                         continue
-                    data = self._stream.read(native_chunk, exception_on_overflow=False)
+                    if self._stream.get_read_available() >= native_chunk:
+                        data = self._stream.read(native_chunk, exception_on_overflow=False)
+                if data is None:
+                    time.sleep(0.005)
+                    continue
             except Exception as e:
+                if self._restart_event.is_set():
+                    continue  # will be handled at top of loop
                 log.warning(f"Read error (device may have changed): {e}")
                 try:
                     time.sleep(0.5)

@@ -71,7 +71,24 @@ def setup_logging():
     for noisy in ("httpcore", "httpx", "openai", "filelock", "huggingface_hub"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     logging.info(f"Log file: {log_file}")
-    return logging.getLogger("LiveTrans")
+
+    _logger = logging.getLogger("LiveTrans")
+
+    def _excepthook(exc_type, exc_value, exc_tb):
+        _logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_tb))
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _excepthook
+
+    def _thread_excepthook(args):
+        _logger.critical(
+            f"Uncaught exception in thread {args.thread}",
+            exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+        )
+
+    threading.excepthook = _thread_excepthook
+
+    return _logger
 
 
 log = logging.getLogger("LiveTrans")
@@ -193,7 +210,13 @@ class LiveTransApp:
         if "asr_engine" in settings:
             self._switch_asr_engine(settings["asr_engine"])
         if "audio_device" in settings:
+            old_device = self._audio._device_name
             self._audio.set_device(settings["audio_device"])
+            if old_device != settings.get("audio_device"):
+                self._vad.flush()
+                self._vad._reset()
+                if self._overlay:
+                    self._overlay.update_monitor(0.0, 0.0)
         if "target_language" in settings:
             self._target_language = settings["target_language"]
             if self._overlay:
