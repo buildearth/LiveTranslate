@@ -1196,14 +1196,14 @@ class ControlPanel(QWidget):
             self._auto_save()
 
     def _on_timing_changed(self):
-        self._current_settings["min_speech_duration"] = self._min_speech.value()
-        self._current_settings["max_speech_duration"] = self._max_speech.value()
+        self._current_settings["min_speech_duration"] = round(self._min_speech.value(), 2)
+        self._current_settings["max_speech_duration"] = round(self._max_speech.value(), 2)
         self._current_settings["silence_mode"] = (
             "auto" if self._silence_mode.currentIndex() == 0 else "fixed"
         )
-        self._current_settings["silence_duration"] = self._silence_duration.value()
+        self._current_settings["silence_duration"] = round(self._silence_duration.value(), 2)
         self._current_settings["incremental_asr"] = self._incremental_asr_cb.isChecked()
-        self._current_settings["interim_interval"] = self._interim_interval_spin.value()
+        self._current_settings["interim_interval"] = round(self._interim_interval_spin.value(), 2)
 
     def _on_ui_lang_changed(self, index):
         lang = "en" if index == 0 else "zh"
