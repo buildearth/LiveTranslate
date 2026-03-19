@@ -830,10 +830,20 @@ def main():
         panel._current_settings["subtitle_mode"] = sm
         _save_settings(settings)
 
+    _subwin_notified = [False]
+
     def on_toggle_subwin(checked):
         if checked:
             subwin.show()
             subwin.raise_()
+            if not _subwin_notified[0]:
+                _subwin_notified[0] = True
+                tray.showMessage(
+                    "LiveTrans",
+                    t("subwin_drag_hint"),
+                    QSystemTrayIcon.MessageIcon.Information,
+                    3000,
+                )
         else:
             subwin.hide()
         overlay.set_subtitle_checked(checked)

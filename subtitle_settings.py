@@ -108,7 +108,6 @@ def _make_image_rows(current_path: str, on_change):
 
     clear_btn.clicked.connect(_clear)
     btn_row.addWidget(clear_btn)
-    btn_row.addStretch()
     box.addLayout(btn_row)
 
     return box, line_edit
@@ -328,6 +327,7 @@ class SubtitleSettingsWidget(QWidget):
         self._width_spin.setValue(self._settings.get("window_width", 1000))
         self._bg_color_btn.set_color(self._settings.get("bg_color", "#000000"))
         self._bg_opacity_spin.setValue(round(self._settings.get("bg_opacity", 0) / 255 * 100))
+        self._border_radius_spin.setValue(self._settings.get("border_radius", 8))
         self._win_bg_image_edit.setText(self._settings.get("bg_image", ""))
         self._auto_hide_spin.setValue(self._settings.get("auto_hide_timeout", 0))
         idx = self._hide_anim_combo.findData(self._settings.get("auto_hide_animation", "fade"))
@@ -353,9 +353,6 @@ class SubtitleSettingsWidget(QWidget):
         reset_btn = QPushButton(t("subwin_reset"))
         reset_btn.clicked.connect(self._on_reset)
         btn_row.addWidget(reset_btn)
-        hint_btn = QPushButton(t("subwin_help"))
-        hint_btn.clicked.connect(lambda: QMessageBox.information(self, t("subwin_help"), t("subwin_hint")))
-        btn_row.addWidget(hint_btn)
         g.addLayout(btn_row, r, 0, 1, 2)
         r += 1
 
@@ -398,6 +395,15 @@ class SubtitleSettingsWidget(QWidget):
             self._bg_color_label, self._bg_color_btn,
             self._bg_opacity_label_title, self._bg_opacity_spin,
         ]
+
+        g.addWidget(QLabel(t("subwin_border_radius")), r, 0)
+        self._border_radius_spin = QSpinBox()
+        self._border_radius_spin.setRange(0, 30)
+        self._border_radius_spin.setSuffix(" px")
+        self._border_radius_spin.setValue(self._settings.get("border_radius", 8))
+        self._border_radius_spin.valueChanged.connect(self._on_change)
+        g.addWidget(self._border_radius_spin, r, 1)
+        r += 1
 
         g.addWidget(QLabel(t("subwin_bg_image")), r, 0)
         img_row, self._win_bg_image_edit = _make_image_rows(
@@ -600,6 +606,7 @@ class SubtitleSettingsWidget(QWidget):
             "window_width": self._width_spin.value(),
             "bg_color": self._bg_color_btn.color(),
             "bg_opacity": round(self._bg_opacity_spin.value() / 100 * 255),
+            "border_radius": self._border_radius_spin.value(),
             "bg_image": self._win_bg_image_edit.text(),
             "auto_hide_timeout": self._auto_hide_spin.value(),
             "auto_hide_animation": self._hide_anim_combo.currentData() or "fade",

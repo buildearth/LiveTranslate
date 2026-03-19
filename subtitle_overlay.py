@@ -616,7 +616,7 @@ class DragHandle(QWidget):
         # Mode toggle button
         self._mode_btn = _btn(t("mode_full"))
         self._mode_btn.clicked.connect(self._toggle_mode)
-        row1.addWidget(self._clear_btn)
+        row1.addWidget(self._mode_btn)
 
         settings_btn = _btn(t("settings"))
         settings_btn.clicked.connect(self.settings_clicked.emit)

@@ -46,9 +46,10 @@ DEFAULT_SUBTITLE_WIN_SETTINGS = {
     "window_width": 1000,
     "line_spacing": 8,
     "bg_color": "#000000",
-    "bg_opacity": 0,
+    "bg_opacity": 76,
     "bg_image": "",
-    "auto_hide_timeout": 0,
+    "border_radius": 8,
+    "auto_hide_timeout": 5,
     "auto_hide_animation": "fade",
     "auto_hide_duration": 300,
     "lines": [
@@ -554,7 +555,8 @@ class SubtitleWindow(QWidget):
                 self._content.setStyleSheet("background: transparent;")
             else:
                 rgba = _hex_to_rgba(color, opacity)
-                self._content.setStyleSheet(f"background: {rgba}; border-radius: 8px;")
+                radius = s.get("border_radius", 8)
+                self._content.setStyleSheet(f"background: {rgba}; border-radius: {radius}px;")
         self.update()
 
     def _fit_height(self):
