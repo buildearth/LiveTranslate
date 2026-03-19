@@ -150,13 +150,6 @@ class VADProcessor:
         effective_threshold = self.threshold if self.mode == "silero" else 0.5
         eff_silence_limit = self._get_effective_silence_limit()
 
-        log.debug(
-            f"VAD conf={confidence:.3f} ({self.mode}), speaking={self._is_speaking}, "
-            f"buf={self._speech_samples / self.sample_rate:.1f}s, "
-            f"silence_cnt={self._silence_counter}, limit={eff_silence_limit} "
-            f"(base={self._silence_limit})"
-        )
-
         if confidence >= effective_threshold:
             # Record pause duration for adaptive mode
             if self._is_speaking and self._silence_counter > 0:
@@ -205,7 +198,14 @@ class VADProcessor:
                 )
                 return self.force_flush()
             else:
-                self._reset()
+                # Too short — keep buffer, merge with next speech onset
+                log.debug(
+                    f"Short segment {self._speech_samples / self.sample_rate:.1f}s "
+                    f"< min {self.min_speech_samples / self.sample_rate:.1f}s, "
+                    f"keeping for merge"
+                )
+                self._is_speaking = False
+                self._silence_counter = 0
                 return None
 
         return None

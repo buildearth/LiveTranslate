@@ -678,29 +678,34 @@ class LiveTransApp:
 
     # ── Incremental ASR ──
 
-    _SENTENCE_END_RE = None
+    _pysbd_cache = {}  # lang -> pysbd.Segmenter
 
     @staticmethod
-    def _get_sentence_re():
-        if LiveTransApp._SENTENCE_END_RE is None:
-            import re
-            LiveTransApp._SENTENCE_END_RE = re.compile(r'(?<=[。！？!?.])\s*')
-        return LiveTransApp._SENTENCE_END_RE
+    def _get_segmenter(lang: str):
+        import pysbd
+        if lang not in LiveTransApp._pysbd_cache:
+            pysbd_lang = lang if lang in pysbd.languages.LANGUAGE_CODES else "en"
+            LiveTransApp._pysbd_cache[lang] = pysbd.Segmenter(
+                language=pysbd_lang, clean=False
+            )
+        return LiveTransApp._pysbd_cache[lang]
 
-    def _split_sentences(self, text: str) -> list[str]:
-        """Split text on sentence-ending punctuation, with last-comma fallback."""
-        parts = self._get_sentence_re().split(text)
-        parts = [p for p in parts if p.strip()]
+    def _split_sentences(self, text: str, lang: str = "en") -> list[str]:
+        """Split text into sentences using pysbd, with comma fallback for long text."""
+        seg = self._get_segmenter(lang)
+        parts = [p for p in seg.segment(text) if p.strip()]
         if len(parts) > 1:
             return parts
 
-        # Fallback: split at LAST comma/semicolon (produces exactly 2 parts)
-        if len(text) > 40:
+        # Comma fallback for long unsplit text — split at last balanced comma
+        # CJK 「、」at 25 chars; all commas at 60 chars (long sentence, reduce latency)
+        min_len = 25 if any(c == '、' for c in text) else 60
+        if len(text) > min_len:
             for i in range(len(text) - 8, 5, -1):
-                if text[i] in ',，;；':
+                if text[i] in ',，;；、':
                     before = text[:i + 1].strip()
                     after = text[i + 1:].strip()
-                    if before and after and len(after) > 3:
+                    if before and after and len(before) > 15 and len(after) > 3:
                         return [before, after]
 
         return parts
@@ -765,9 +770,12 @@ class LiveTransApp:
         if not full_text:
             return False
 
-        sentences = self._split_sentences(full_text)
+        split_start = time.perf_counter()
+        sentences = self._split_sentences(full_text, result["language"])
+        split_ms = (time.perf_counter() - split_start) * 1000
         if len(sentences) <= 1:
             return False
+        log.debug(f"Interim split [{result['language']}] ({split_ms:.1f}ms): {len(sentences)} parts -> {sentences}")
 
         # All but last are complete; last is still being spoken
         complete = sentences[:-1]
@@ -796,9 +804,13 @@ class LiveTransApp:
                     break
             trim_samples = int(last_word_end * 16000)
         else:
-            # Proportional trim — no overlap margin, dedup handles echoes
+            # Proportional trim with safety margin to reduce echo
             ratio = len(committed_text) / max(len(full_text), 1)
-            trim_samples = int(ratio * total_samples)
+            margin = int(0.3 * 16000)  # 0.3s extra trim to avoid re-recognition
+            trim_samples = int(ratio * total_samples) + margin
+            # Don't over-trim: keep at least 0.5s for the remaining sentence
+            max_trim = total_samples - int(0.5 * 16000)
+            trim_samples = min(trim_samples, max(max_trim, 0))
             # Minimum trim to prevent re-recognition loops
             min_trim = int(0.3 * 16000)
             if trim_samples < min_trim and trim_samples > 0:
