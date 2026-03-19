@@ -559,17 +559,13 @@ class ControlPanel(QWidget):
         bg_layout.addWidget(self._bg_color_btn, 0, 1)
 
         bg_layout.addWidget(QLabel(t("label_bg_opacity")), 1, 0)
-        self._bg_opacity = QSlider(Qt.Orientation.Horizontal)
-        self._bg_opacity.setRange(0, 255)
-        self._bg_opacity.setValue(s.get("bg_opacity", DEFAULT_STYLE["bg_opacity"]))
-        self._bg_opacity_label = QLabel(str(self._bg_opacity.value()))
-        self._bg_opacity.valueChanged.connect(
-            lambda v: self._bg_opacity_label.setText(str(v))
-        )
+        self._bg_opacity = QSpinBox()
+        self._bg_opacity.setRange(0, 100)
+        self._bg_opacity.setSuffix("%")
+        self._bg_opacity.setValue(round(s.get("bg_opacity", DEFAULT_STYLE["bg_opacity"]) / 255 * 100))
         self._bg_opacity.valueChanged.connect(self._on_style_value_changed)
-        self._bg_opacity.sliderReleased.connect(self._auto_save)
+        self._bg_opacity.valueChanged.connect(self._auto_save)
         bg_layout.addWidget(self._bg_opacity, 1, 1)
-        bg_layout.addWidget(self._bg_opacity_label, 1, 2)
 
         bg_layout.addWidget(QLabel(t("label_header_color")), 2, 0)
         self._header_color_btn = self._make_color_btn(
@@ -581,19 +577,13 @@ class ControlPanel(QWidget):
         bg_layout.addWidget(self._header_color_btn, 2, 1)
 
         bg_layout.addWidget(QLabel(t("label_header_opacity")), 3, 0)
-        self._header_opacity = QSlider(Qt.Orientation.Horizontal)
-        self._header_opacity.setRange(0, 255)
-        self._header_opacity.setValue(
-            s.get("header_opacity", DEFAULT_STYLE["header_opacity"])
-        )
-        self._header_opacity_label = QLabel(str(self._header_opacity.value()))
-        self._header_opacity.valueChanged.connect(
-            lambda v: self._header_opacity_label.setText(str(v))
-        )
+        self._header_opacity = QSpinBox()
+        self._header_opacity.setRange(0, 100)
+        self._header_opacity.setSuffix("%")
+        self._header_opacity.setValue(round(s.get("header_opacity", DEFAULT_STYLE["header_opacity"]) / 255 * 100))
         self._header_opacity.valueChanged.connect(self._on_style_value_changed)
-        self._header_opacity.sliderReleased.connect(self._auto_save)
+        self._header_opacity.valueChanged.connect(self._auto_save)
         bg_layout.addWidget(self._header_opacity, 3, 1)
-        bg_layout.addWidget(self._header_opacity_label, 3, 2)
 
         bg_layout.addWidget(QLabel(t("label_border_radius")), 4, 0)
         self._border_radius = QSpinBox()
@@ -687,19 +677,13 @@ class ControlPanel(QWidget):
         win_group = QGroupBox(t("group_window"))
         win_layout = QGridLayout(win_group)
         win_layout.addWidget(QLabel(t("label_window_opacity")), 0, 0)
-        self._window_opacity = QSlider(Qt.Orientation.Horizontal)
+        self._window_opacity = QSpinBox()
         self._window_opacity.setRange(30, 100)
-        self._window_opacity.setValue(
-            s.get("window_opacity", DEFAULT_STYLE["window_opacity"])
-        )
-        self._window_opacity_label = QLabel(f"{self._window_opacity.value()}%")
-        self._window_opacity.valueChanged.connect(
-            lambda v: self._window_opacity_label.setText(f"{v}%")
-        )
+        self._window_opacity.setSuffix("%")
+        self._window_opacity.setValue(s.get("window_opacity", DEFAULT_STYLE["window_opacity"]))
         self._window_opacity.valueChanged.connect(self._on_style_value_changed)
-        self._window_opacity.sliderReleased.connect(self._auto_save)
+        self._window_opacity.valueChanged.connect(self._auto_save)
         win_layout.addWidget(self._window_opacity, 0, 1)
-        win_layout.addWidget(self._window_opacity_label, 0, 2)
         layout.addWidget(win_group)
 
         layout.addStretch()
@@ -732,9 +716,9 @@ class ControlPanel(QWidget):
         return {
             "preset": self._preset_keys[self._style_preset.currentIndex()],
             "bg_color": self._bg_color_btn.property("hex_color"),
-            "bg_opacity": self._bg_opacity.value(),
+            "bg_opacity": round(self._bg_opacity.value() / 100 * 255),
             "header_color": self._header_color_btn.property("hex_color"),
-            "header_opacity": self._header_opacity.value(),
+            "header_opacity": round(self._header_opacity.value() / 100 * 255),
             "border_radius": self._border_radius.value(),
             "original_font_family": self._orig_font_combo.currentFont().family(),
             "translation_font_family": self._trans_font_combo.currentFont().family(),
@@ -752,12 +736,12 @@ class ControlPanel(QWidget):
         self._bg_color_btn.setStyleSheet(
             f"background-color: {s['bg_color']}; border: 1px solid #888; border-radius: 3px;"
         )
-        self._bg_opacity.setValue(s["bg_opacity"])
+        self._bg_opacity.setValue(round(s["bg_opacity"] / 255 * 100))
         self._header_color_btn.setProperty("hex_color", s["header_color"])
         self._header_color_btn.setStyleSheet(
             f"background-color: {s['header_color']}; border: 1px solid #888; border-radius: 3px;"
         )
-        self._header_opacity.setValue(s["header_opacity"])
+        self._header_opacity.setValue(round(s["header_opacity"] / 255 * 100))
         self._border_radius.setValue(s["border_radius"])
         self._orig_font_combo.setCurrentFont(QFont(s["original_font_family"]))
         self._trans_font_combo.setCurrentFont(QFont(s["translation_font_family"]))
@@ -798,12 +782,7 @@ class ControlPanel(QWidget):
             self._style_preset.blockSignals(True)
             self._style_preset.setCurrentIndex(custom_idx)
             self._style_preset.blockSignals(False)
-        if (
-            not self._bg_opacity.isSliderDown()
-            and not self._header_opacity.isSliderDown()
-            and not self._window_opacity.isSliderDown()
-        ):
-            self._auto_save()
+        self._auto_save()
 
     def _reset_style(self):
         from subtitle_overlay import DEFAULT_STYLE

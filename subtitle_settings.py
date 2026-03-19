@@ -192,6 +192,8 @@ class _LineConfigWidget(QWidget):
         outer.addLayout(hdr)
 
         grid = QGridLayout()
+        grid.setColumnStretch(0, 1)
+        grid.setColumnMinimumWidth(1, 180)
         r = 0
 
         grid.addWidget(QLabel(t("subwin_font")), r, 0)
@@ -429,7 +431,9 @@ class SubtitleSettingsWidget(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.viewport().setAutoFillBackground(False)
         scroll_widget = QWidget()
+        scroll_widget.setAutoFillBackground(False)
         self._scroll_layout = QVBoxLayout(scroll_widget)
         self._scroll_layout.setSpacing(6)
         self._scroll_layout.setContentsMargins(0, 0, 0, 0)
@@ -437,6 +441,8 @@ class SubtitleSettingsWidget(QWidget):
         # === Window settings ===
         win_group = QGroupBox(t("subwin_basic"))
         g = QGridLayout(win_group)
+        g.setColumnStretch(0, 1)
+        g.setColumnMinimumWidth(1, 180)
         r = 0
 
         g.addWidget(QLabel(t("subwin_window_width")), r, 0)
