@@ -1006,6 +1006,8 @@ class ControlPanel(QWidget):
 
     def _on_engine_changed_whisper_vis(self, index):
         self._whisper_group.setVisible(index == 0)
+        # Resize window to fit content after whisper group visibility change
+        QTimer.singleShot(0, lambda: self.resize(self.width(), self.sizeHint().height()))
 
     def _update_whisper_size_label(self):
         from model_manager import is_asr_cached, _MODEL_SIZE_BYTES
