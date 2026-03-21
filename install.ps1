@@ -112,11 +112,25 @@ Write-Ok "pip upgraded"
 Write-Step "Detecting GPU..."
 
 $HasNvidia = $false
+$CudaVer = "cu126"
 try {
     $gpu = & nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>$null
     if ($LASTEXITCODE -eq 0 -and $gpu) {
         $HasNvidia = $true
         Write-Ok "NVIDIA GPU detected: $($gpu.Trim())"
+
+        # Detect compute capability to choose CUDA version
+        # Blackwell (sm_120, compute_cap >= 12.0) requires cu128
+        $cc = & nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>$null
+        if ($LASTEXITCODE -eq 0 -and $cc) {
+            $ccVal = [double]($cc.Trim())
+            if ($ccVal -ge 12.0) {
+                $CudaVer = "cu128"
+                Write-Ok "Blackwell+ architecture (sm_$($cc.Trim() -replace '\.','')) detected, using CUDA 12.8"
+            } else {
+                Write-Ok "Compute capability $($cc.Trim()), using CUDA 12.6"
+            }
+        }
     }
 } catch {}
 
@@ -127,13 +141,14 @@ if (-not $HasNvidia) {
 # Let user choose
 Write-Host ""
 if ($HasNvidia) {
-    Write-Host "  [1] CUDA 12.6 (recommended for NVIDIA GPU)" -ForegroundColor White
+    $cudaLabel = if ($CudaVer -eq "cu128") { "CUDA 12.8" } else { "CUDA 12.6" }
+    Write-Host "  [1] $cudaLabel (recommended for your NVIDIA GPU)" -ForegroundColor White
     Write-Host "  [2] CPU only" -ForegroundColor White
     $choice = Read-Host "  Select PyTorch version [1]"
     if ($choice -eq "2") { $HasNvidia = $false }
 } else {
     Write-Host "  [1] CPU only" -ForegroundColor White
-    Write-Host "  [2] CUDA 12.6 (if you have NVIDIA GPU)" -ForegroundColor White
+    Write-Host "  [2] CUDA (if you have NVIDIA GPU)" -ForegroundColor White
     $choice = Read-Host "  Select PyTorch version [1]"
     if ($choice -eq "2") { $HasNvidia = $true }
 }
@@ -142,7 +157,8 @@ if ($HasNvidia) {
 Write-Step "Installing PyTorch (this may take a few minutes)..."
 
 if ($HasNvidia) {
-    & $Pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126
+    Write-Host "  Using index: $CudaVer" -ForegroundColor Gray
+    & $Pip install torch torchaudio --index-url https://download.pytorch.org/whl/$CudaVer
 } else {
     & $Pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 }

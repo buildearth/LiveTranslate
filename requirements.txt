@@ -36,3 +36,5 @@ PyQt6>=6.5.0
 
 # torch & torchaudio - install separately with CUDA support:
 #   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126
+#   Blackwell GPUs (RTX 50xx, sm_120) require cu128:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128

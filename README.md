@@ -34,7 +34,7 @@ Works with any system audio — videos, livestreams, voice chat. No player modif
 
 - **OS**: Windows 10/11
 - **Python**: 3.10+
-- **GPU** (recommended): NVIDIA + CUDA 12.6
+- **GPU** (recommended): NVIDIA + CUDA 12.6 (Blackwell GPUs like RTX 50xx require CUDA 12.8)
 - **Network**: Access to a translation API
 
 ## Quick Start
@@ -63,6 +63,7 @@ python -m venv .venv
 
 # PyTorch (choose one)
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126  # CUDA
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128  # CUDA (RTX 50xx)
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu    # CPU only
 
 # Dependencies
