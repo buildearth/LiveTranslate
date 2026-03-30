@@ -8,14 +8,17 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QColorDialog,
     QComboBox,
     QDoubleSpinBox,
     QFontComboBox,
+    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -127,17 +130,22 @@ class ControlPanel(QWidget):
             ]
             self._current_settings["active_model"] = 0
 
+        self._presets = {}
+
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
 
         tabs.addTab(self._create_vad_tab(), t("tab_vad_asr"))
-        tabs.addTab(self._create_translation_tab(), t("tab_translation"))
+        tabs.addTab(self._create_analysis_tab(), t("analysis_panel"))
+        tabs.addTab(self._create_preset_tab(), t("preset_tab"))
         tabs.addTab(self._create_style_tab(), t("tab_style"))
         tabs.addTab(self._create_subtitle_tab(), t("tab_subtitle"))
         tabs.addTab(self._create_benchmark_tab(), t("tab_benchmark"))
         self._cache_tab_index = tabs.addTab(self._create_cache_tab(), t("tab_cache"))
         tabs.addTab(self._create_changelog_tab(), t("tab_changelog"))
         tabs.currentChanged.connect(self._on_tab_changed)
+
+        self._load_presets()
 
         layout.addWidget(tabs)
 
@@ -428,9 +436,10 @@ class ControlPanel(QWidget):
         layout.addStretch()
         return widget
 
-    # ── Translation Tab ──
+    # ── Analysis Tab ──
 
-    def _create_translation_tab(self):
+    def _create_analysis_tab(self):
+        """Tab for AI analysis model and settings."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         s = self._current_settings
@@ -460,64 +469,122 @@ class ControlPanel(QWidget):
         models_layout.addLayout(btn_row)
         layout.addWidget(models_group)
 
-        prompt_group = QGroupBox(t("group_system_prompt"))
-        prompt_layout = QVBoxLayout(prompt_group)
+        # Analysis settings group
+        analysis_group = QGroupBox(t("analysis_panel"))
+        ag_layout = QFormLayout(analysis_group)
 
-        from translator import DEFAULT_PROMPT, PROMPT_PRESETS
+        self._debounce_spin = QSpinBox()
+        self._debounce_spin.setRange(200, 3000)
+        self._debounce_spin.setSuffix(" ms")
+        self._debounce_spin.setValue(s.get("debounce_ms", 800))
+        self._debounce_spin.valueChanged.connect(self._auto_save)
+        ag_layout.addRow("Debounce:", self._debounce_spin)
 
-        # Preset selector
-        preset_row = QHBoxLayout()
-        preset_row.addWidget(QLabel(t("label_prompt_preset")))
-        self._prompt_preset = QComboBox()
-        self._prompt_preset.addItem(t("prompt_daily"), "daily")
-        self._prompt_preset.addItem(t("prompt_esports"), "esports")
-        self._prompt_preset.addItem(t("prompt_anime"), "anime")
-        self._prompt_preset.addItem(t("prompt_custom"), "custom")
+        self._batch_spin = QSpinBox()
+        self._batch_spin.setRange(1, 10)
+        self._batch_spin.setValue(s.get("batch_threshold", 3))
+        self._batch_spin.valueChanged.connect(self._auto_save)
+        ag_layout.addRow("Batch:", self._batch_spin)
 
-        current_prompt = s.get("system_prompt", DEFAULT_PROMPT)
-        preset_idx = 3  # default to custom
-        for i, key in enumerate(["daily", "esports", "anime"]):
-            if current_prompt.strip() == PROMPT_PRESETS[key].strip():
-                preset_idx = i
-                break
-        if current_prompt.strip() == DEFAULT_PROMPT.strip():
-            preset_idx = 0
-        self._prompt_preset.setCurrentIndex(preset_idx)
-        self._prompt_preset.currentIndexChanged.connect(self._on_prompt_preset_changed)
-        preset_row.addWidget(self._prompt_preset, 1)
-        prompt_layout.addLayout(preset_row)
+        self._summary_spin = QSpinBox()
+        self._summary_spin.setRange(5, 50)
+        self._summary_spin.setValue(s.get("summary_threshold", 15))
+        self._summary_spin.valueChanged.connect(self._auto_save)
+        ag_layout.addRow(t("summary_tokens") + ":", self._summary_spin)
 
-        # Prompt text editor
-        self._prompt_edit = QTextEdit()
-        self._prompt_edit.setFont(QFont("Consolas", 9))
-        self._prompt_edit.setMaximumHeight(100)
-        self._prompt_edit.setPlainText(current_prompt)
-        self._prompt_debounce = QTimer()
-        self._prompt_debounce.setSingleShot(True)
-        self._prompt_debounce.setInterval(600)
-        self._prompt_debounce.timeout.connect(self._apply_prompt)
-        self._prompt_edit.textChanged.connect(self._prompt_debounce.start)
-        prompt_layout.addWidget(self._prompt_edit)
-        layout.addWidget(prompt_group)
+        self._timeout_spin_analysis = QSpinBox()
+        self._timeout_spin_analysis.setRange(1, 60)
+        self._timeout_spin_analysis.setSuffix(" s")
+        self._timeout_spin_analysis.setValue(s.get("timeout", 10))
+        self._timeout_spin_analysis.valueChanged.connect(self._auto_save)
+        ag_layout.addRow("Timeout:", self._timeout_spin_analysis)
 
-        net_group = QGroupBox(t("group_network"))
-        net_layout = QGridLayout(net_group)
-        net_layout.setColumnStretch(0, 1)
-        net_layout.setColumnMinimumWidth(1, 180)
-        net_layout.addWidget(QLabel(t("label_timeout")), 0, 0)
-        self._timeout_spin = QSpinBox()
-        self._timeout_spin.setRange(1, 60)
-        self._timeout_spin.setValue(s.get("timeout", 5))
-        self._timeout_spin.setSuffix(" s")
-        self._timeout_spin.valueChanged.connect(
-            lambda v: self._current_settings.update({"timeout": v})
-        )
-        self._timeout_spin.valueChanged.connect(self._auto_save)
-        net_layout.addWidget(self._timeout_spin, 0, 1)
-        layout.addWidget(net_group)
-
+        layout.addWidget(analysis_group)
         layout.addStretch()
         return widget
+
+    # ── Preset Tab ──
+
+    def _create_preset_tab(self):
+        """Tab for scene preset structured editor."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Preset list
+        list_row = QHBoxLayout()
+        self._preset_list = QListWidget()
+        self._preset_list.currentRowChanged.connect(self._on_preset_selected)
+        list_row.addWidget(self._preset_list)
+
+        btn_col = QVBoxLayout()
+        self._preset_add_btn = QPushButton(t("preset_add"))
+        self._preset_add_btn.clicked.connect(self._on_preset_add)
+        btn_col.addWidget(self._preset_add_btn)
+
+        self._preset_dup_btn = QPushButton(t("preset_duplicate"))
+        self._preset_dup_btn.clicked.connect(self._on_preset_duplicate)
+        btn_col.addWidget(self._preset_dup_btn)
+
+        self._preset_del_btn = QPushButton(t("preset_delete"))
+        self._preset_del_btn.clicked.connect(self._on_preset_delete)
+        btn_col.addWidget(self._preset_del_btn)
+
+        btn_col.addStretch()
+        list_row.addLayout(btn_col)
+        layout.addLayout(list_row)
+
+        # Editor area
+        editor_group = QGroupBox(t("preset_edit"))
+        eg_layout = QFormLayout(editor_group)
+
+        self._pe_name = QLineEdit()
+        eg_layout.addRow(t("preset_name") + ":", self._pe_name)
+
+        self._pe_role = QLineEdit()
+        eg_layout.addRow(t("preset_role") + ":", self._pe_role)
+
+        # Focus tags as checkboxes in a flow layout
+        from analysis_presets import FOCUS_TAGS, OUTPUT_TAGS
+        self._pe_focus_checks = {}
+        focus_widget = QWidget()
+        focus_flow = QHBoxLayout(focus_widget)
+        focus_flow.setContentsMargins(0, 0, 0, 0)
+        for tag in FOCUS_TAGS:
+            cb = QCheckBox(tag)
+            self._pe_focus_checks[tag] = cb
+            focus_flow.addWidget(cb)
+        eg_layout.addRow(t("preset_focus") + ":", focus_widget)
+
+        self._pe_output_checks = {}
+        output_widget = QWidget()
+        output_flow = QHBoxLayout(output_widget)
+        output_flow.setContentsMargins(0, 0, 0, 0)
+        for tag in OUTPUT_TAGS:
+            cb = QCheckBox(tag)
+            self._pe_output_checks[tag] = cb
+            output_flow.addWidget(cb)
+        eg_layout.addRow(t("preset_output") + ":", output_widget)
+
+        self._pe_extra = QTextEdit()
+        self._pe_extra.setMaximumHeight(60)
+        eg_layout.addRow(t("preset_extra") + ":", self._pe_extra)
+
+        self._pe_advanced_check = QCheckBox(t("preset_advanced"))
+        self._pe_advanced_check.toggled.connect(self._on_preset_advanced_toggle)
+        eg_layout.addRow(self._pe_advanced_check)
+
+        self._pe_advanced_edit = QTextEdit()
+        self._pe_advanced_edit.setMaximumHeight(120)
+        self._pe_advanced_edit.setVisible(False)
+        eg_layout.addRow(self._pe_advanced_edit)
+
+        layout.addWidget(editor_group)
+
+        save_btn = QPushButton(t("preset_edit"))
+        save_btn.clicked.connect(self._on_preset_save)
+        layout.addWidget(save_btn)
+
+        return tab
 
     # ── Style Tab ──
 
@@ -1044,6 +1111,108 @@ class ControlPanel(QWidget):
             # Switch to Whisper engine with the downloaded size
             self._auto_save()
 
+    # ── Preset Management ──
+
+    def _load_presets(self):
+        from analysis_presets import ANALYSIS_PRESETS, AnalysisPreset
+        self._presets = {}
+        for name, preset in ANALYSIS_PRESETS.items():
+            self._presets[name] = preset
+        saved = self._current_settings.get("analysis_presets", [])
+        for d in saved:
+            p = AnalysisPreset.from_dict(d)
+            self._presets[p.name] = p
+        self._refresh_preset_list()
+
+    def _refresh_preset_list(self):
+        self._preset_list.clear()
+        for name, preset in self._presets.items():
+            suffix = " " + t("preset_builtin") if preset.builtin else ""
+            self._preset_list.addItem(name + suffix)
+
+    def _on_preset_selected(self, row):
+        if row < 0:
+            return
+        name = list(self._presets.keys())[row]
+        preset = self._presets[name]
+        self._pe_name.setText(preset.name)
+        self._pe_name.setReadOnly(preset.builtin)
+        self._pe_role.setText(preset.role)
+        for tag, cb in self._pe_focus_checks.items():
+            cb.setChecked(tag in preset.focus_tags)
+        for tag, cb in self._pe_output_checks.items():
+            cb.setChecked(tag in preset.output_tags)
+        self._pe_extra.setPlainText(preset.extra_instructions)
+        self._pe_advanced_check.setChecked(preset.is_advanced)
+        self._pe_advanced_edit.setPlainText(preset.advanced_prompt)
+        self._pe_advanced_edit.setVisible(preset.is_advanced)
+
+    def _on_preset_advanced_toggle(self, checked):
+        self._pe_advanced_edit.setVisible(checked)
+
+    def _on_preset_add(self):
+        from analysis_presets import AnalysisPreset
+        name = f"自定义{len(self._presets) + 1}"
+        self._presets[name] = AnalysisPreset(name=name)
+        self._refresh_preset_list()
+        self._preset_list.setCurrentRow(len(self._presets) - 1)
+
+    def _on_preset_duplicate(self):
+        row = self._preset_list.currentRow()
+        if row < 0:
+            return
+        from analysis_presets import AnalysisPreset
+        src = list(self._presets.values())[row]
+        d = src.to_dict()
+        d["name"] = src.name + " (副本)"
+        new_preset = AnalysisPreset.from_dict(d)
+        self._presets[new_preset.name] = new_preset
+        self._refresh_preset_list()
+
+    def _on_preset_delete(self):
+        row = self._preset_list.currentRow()
+        if row < 0:
+            return
+        name = list(self._presets.keys())[row]
+        if self._presets[name].builtin:
+            return
+        del self._presets[name]
+        self._refresh_preset_list()
+        self._save_presets()
+
+    def _on_preset_save(self):
+        row = self._preset_list.currentRow()
+        if row < 0:
+            return
+        old_name = list(self._presets.keys())[row]
+        preset = self._presets[old_name]
+        if preset.builtin:
+            return
+        new_name = self._pe_name.text().strip()
+        preset.name = new_name or old_name
+        preset.role = self._pe_role.text().strip()
+        preset.focus_tags = [tag for tag, cb in self._pe_focus_checks.items() if cb.isChecked()]
+        preset.output_tags = [tag for tag, cb in self._pe_output_checks.items() if cb.isChecked()]
+        preset.extra_instructions = self._pe_extra.toPlainText().strip()
+        preset.is_advanced = self._pe_advanced_check.isChecked()
+        preset.advanced_prompt = self._pe_advanced_edit.toPlainText().strip()
+        if new_name != old_name:
+            del self._presets[old_name]
+            self._presets[new_name] = preset
+        self._refresh_preset_list()
+        self._save_presets()
+
+    def _save_presets(self):
+        user_presets = [p.to_dict() for p in self._presets.values() if not p.builtin]
+        self._current_settings["analysis_presets"] = user_presets
+        self._auto_save()
+
+    def get_preset(self, name: str):
+        return self._presets.get(name)
+
+    def get_all_preset_names(self) -> list[str]:
+        return list(self._presets.keys())
+
     # ── Model Management ──
 
     def _refresh_model_list(self):
@@ -1219,35 +1388,6 @@ class ControlPanel(QWidget):
         self._apply_settings()
         _save_settings(self._current_settings)
 
-    def _on_prompt_preset_changed(self, index):
-        from translator import DEFAULT_PROMPT, PROMPT_PRESETS
-        key = self._prompt_preset.itemData(index)
-        if key == "custom":
-            return
-        prompt = PROMPT_PRESETS.get(key, DEFAULT_PROMPT)
-        self._prompt_edit.setPlainText(prompt)
-        self._apply_prompt()
-
-    def _apply_prompt(self):
-        text = self._prompt_edit.toPlainText().strip()
-        if text:
-            self._current_settings["system_prompt"] = text
-            active = self.get_active_model()
-            if active:
-                self.model_changed.emit(active)
-            _save_settings(self._current_settings)
-            log.info("System prompt updated")
-            # Update preset combo to reflect current state
-            from translator import PROMPT_PRESETS
-            self._prompt_preset.blockSignals(True)
-            matched = 3  # custom
-            for i, key in enumerate(["daily", "esports", "anime"]):
-                if text.strip() == PROMPT_PRESETS[key].strip():
-                    matched = i
-                    break
-            self._prompt_preset.setCurrentIndex(matched)
-            self._prompt_preset.blockSignals(False)
-
     def _apply_settings(self):
         self._current_settings["asr_language"] = self._get_asr_lang_code()
         engine_map = {
@@ -1282,10 +1422,10 @@ class ControlPanel(QWidget):
         self._current_settings["hub"] = (
             "ms" if self._hub_combo.currentIndex() == 0 else "hf"
         )
-        prompt_text = self._prompt_edit.toPlainText().strip()
-        if prompt_text:
-            self._current_settings["system_prompt"] = prompt_text
-        self._current_settings["timeout"] = self._timeout_spin.value()
+        self._current_settings["timeout"] = self._timeout_spin_analysis.value()
+        self._current_settings["debounce_ms"] = self._debounce_spin.value()
+        self._current_settings["batch_threshold"] = self._batch_spin.value()
+        self._current_settings["summary_threshold"] = self._summary_spin.value()
         if hasattr(self, "_style_preset"):
             self._current_settings["style"] = self._collect_style()
         safe = {
