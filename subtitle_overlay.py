@@ -2,7 +2,7 @@ import ctypes
 import os
 
 import psutil
-from i18n import t, LANGUAGES
+from i18n import t
 from PyQt6.QtCore import QPoint, QPropertyAnimation, QEasingCurve, QSize, Qt, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QCursor, QFont
 from PyQt6.QtWidgets import (
@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSizeGrip,
     QSizePolicy,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -201,6 +202,7 @@ class ChatMessage(QWidget):
         original: str,
         source_lang: str,
         asr_ms: float,
+        speaker: str = "",
         parent=None,
     ):
         super().__init__(parent)
@@ -210,6 +212,7 @@ class ChatMessage(QWidget):
         self._timestamp = timestamp
         self._source_lang = source_lang
         self._asr_ms = asr_ms
+        self._speaker = speaker
         self._translate_ms = 0.0
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(8, 4, 8, 4)
@@ -237,12 +240,24 @@ class ChatMessage(QWidget):
         self._layout.addWidget(self._trans_label)
 
     def _build_header_html(self, s):
+        # Speaker tag color: blue for "对方", green for "我方", gray otherwise
+        speaker_html = ""
+        if self._speaker:
+            if self._speaker == "对方":
+                spk_color = "#5B9BD5"
+            elif self._speaker == "我方":
+                spk_color = "#70AD47"
+            else:
+                spk_color = "#999"
+            speaker_html = f'<span style="color:{spk_color};">[{self._speaker}]</span> '
         if self._compact_mode:
             return (
+                f'{speaker_html}'
                 f'<span style="color:#6cf;">[{self._source_lang}]</span> '
                 f'<span style="color:{s["original_color"]};">{_escape(self._original)}</span>'
             )
         return (
+            f'{speaker_html}'
             f'<span style="color:{s["timestamp_color"]};">[{self._timestamp}]</span> '
             f'<span style="color:#6cf;">[{self._source_lang}]</span> '
             f'<span style="color:{s["original_color"]};">{_escape(self._original)}</span> '
@@ -589,7 +604,7 @@ class DragHandle(QWidget):
     auto_scroll_toggled = pyqtSignal(bool)
     taskbar_toggled = pyqtSignal(bool)
     target_language_changed = pyqtSignal(str)
-    source_language_changed = pyqtSignal(str)
+    scene_changed = pyqtSignal(str)
     model_changed = pyqtSignal(int)
     start_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
@@ -721,7 +736,7 @@ class DragHandle(QWidget):
         row2a.addStretch()
         row2_outer.addLayout(row2a)
 
-        # Row 2b: model + source language + target language combos (stretch to fill)
+        # Row 2b: model + scene preset combos (stretch to fill)
         row2b = QHBoxLayout()
         row2b.setContentsMargins(0, 0, 0, 0)
         row2b.setSpacing(4)
@@ -745,50 +760,21 @@ class DragHandle(QWidget):
         self._model_combo.currentIndexChanged.connect(self.model_changed.emit)
         row2b.addWidget(self._model_combo, 3)
 
-        src_lbl = QLabel(t("source_label"))
-        src_lbl.setFont(_lbl_font)
-        src_lbl.setStyleSheet(_lbl_css)
-        row2b.addWidget(src_lbl)
+        # Scene preset combo (replaces target/source language combos)
+        scene_lbl = QLabel(t("scene_label"))
+        scene_lbl.setFont(_lbl_font)
+        scene_lbl.setStyleSheet(_lbl_css)
+        row2b.addWidget(scene_lbl)
 
-        self._source_lang = QComboBox()
-        self._source_lang.setFixedHeight(18)
-        self._source_lang.setFont(_combo_font)
-        self._source_lang.setStyleSheet(_COMBO_CSS)
-        self._source_lang.setSizePolicy(
+        self._scene_combo = QComboBox()
+        self._scene_combo.setFixedHeight(18)
+        self._scene_combo.setFont(_combo_font)
+        self._scene_combo.setStyleSheet(_COMBO_CSS)
+        self._scene_combo.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        for code, native in LANGUAGES:
-            label = t("asr_lang_auto") if code == "auto" else native
-            self._source_lang.addItem(f"{code} - {label}", code)
-        self._source_lang.currentIndexChanged.connect(
-            lambda idx: self.source_language_changed.emit(
-                self._source_lang.currentData() or "auto"
-            )
-        )
-        row2b.addWidget(self._source_lang, 2)
-
-        tgt_lbl = QLabel(t("target_label"))
-        tgt_lbl.setFont(_lbl_font)
-        tgt_lbl.setStyleSheet(_lbl_css)
-        row2b.addWidget(tgt_lbl)
-
-        self._target_lang = QComboBox()
-        self._target_lang.setFixedHeight(18)
-        self._target_lang.setFont(_combo_font)
-        self._target_lang.setStyleSheet(_COMBO_CSS)
-        self._target_lang.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        for code, native in LANGUAGES:
-            if code == "auto":
-                continue
-            self._target_lang.addItem(f"{code} - {native}", code)
-        self._target_lang.currentIndexChanged.connect(
-            lambda idx: self.target_language_changed.emit(
-                self._target_lang.currentData() or "zh"
-            )
-        )
-        row2b.addWidget(self._target_lang, 2)
+        self._scene_combo.currentIndexChanged.connect(self._on_scene_changed)
+        row2b.addWidget(self._scene_combo, 2)
 
         row2_outer.addLayout(row2b)
 
@@ -804,19 +790,21 @@ class DragHandle(QWidget):
         "rgba(255,255,255,20)", "rgba(220,180,60,50)"
     ).replace("color: #aaa", "color: #ddb")
 
-    def set_target_language(self, lang: str):
-        idx = self._target_lang.findData(lang)
-        if idx >= 0:
-            self._target_lang.blockSignals(True)
-            self._target_lang.setCurrentIndex(idx)
-            self._target_lang.blockSignals(False)
+    def set_scenes(self, preset_names: list, active: str = ""):
+        self._scene_combo.blockSignals(True)
+        self._scene_combo.clear()
+        for name in preset_names:
+            self._scene_combo.addItem(name, name)
+        if active:
+            idx = self._scene_combo.findData(active)
+            if idx >= 0:
+                self._scene_combo.setCurrentIndex(idx)
+        self._scene_combo.blockSignals(False)
 
-    def set_source_language(self, lang: str):
-        idx = self._source_lang.findData(lang)
-        if idx >= 0:
-            self._source_lang.blockSignals(True)
-            self._source_lang.setCurrentIndex(idx)
-            self._source_lang.blockSignals(False)
+    def _on_scene_changed(self, index):
+        name = self._scene_combo.itemData(index)
+        if name:
+            self.scene_changed.emit(name)
 
     def set_models(self, models: list, active_index: int = 0):
         self._model_combo.blockSignals(True)
@@ -869,7 +857,7 @@ class DragHandle(QWidget):
 class SubtitleOverlay(QWidget):
     """Chat-style overlay window for displaying live transcription."""
 
-    add_message_signal = pyqtSignal(int, str, str, str, float)
+    add_message_signal = pyqtSignal(int, str, str, str, float, str)  # + speaker
     update_translation_signal = pyqtSignal(int, str, float)
     update_streaming_signal = pyqtSignal(int, str)
     clear_signal = pyqtSignal()
@@ -877,11 +865,16 @@ class SubtitleOverlay(QWidget):
     update_monitor_signal = pyqtSignal(float, float, object)
     update_stats_signal = pyqtSignal(int, int, int, int, float)
     update_asr_device_signal = pyqtSignal(str)
+    # Analysis signals (thread-safe)
+    update_analysis_signal = pyqtSignal(str)
+    finish_analysis_signal = pyqtSignal(str)
 
     settings_requested = pyqtSignal()
     target_language_changed = pyqtSignal(str)
-    source_language_changed = pyqtSignal(str)
+    source_language_changed = pyqtSignal(str)  # kept for API compatibility; no longer emitted
     model_switch_requested = pyqtSignal(int)
+    analyze_requested = pyqtSignal()
+    scene_changed = pyqtSignal(str)
     start_requested = pyqtSignal()
     stop_requested = pyqtSignal()
     hide_requested = pyqtSignal()
@@ -912,6 +905,8 @@ class SubtitleOverlay(QWidget):
         self.update_monitor_signal.connect(self._on_update_monitor)
         self.update_stats_signal.connect(self._on_update_stats)
         self.update_asr_device_signal.connect(self._on_update_asr_device)
+        self.update_analysis_signal.connect(self._on_update_analysis)
+        self.finish_analysis_signal.connect(self._on_finish_analysis)
 
     def _setup_ui(self):
         self.setWindowFlags(
@@ -953,7 +948,7 @@ class SubtitleOverlay(QWidget):
         self._handle.topmost_toggled.connect(self._set_topmost)
         self._handle.taskbar_toggled.connect(self._set_taskbar)
         self._handle.target_language_changed.connect(self.target_language_changed.emit)
-        self._handle.source_language_changed.connect(self.source_language_changed.emit)
+        self._handle.scene_changed.connect(self.scene_changed.emit)
         self._handle.model_changed.connect(self.model_switch_requested.emit)
         self._handle.start_clicked.connect(self.start_requested.emit)
         self._handle.stop_clicked.connect(self.stop_requested.emit)
@@ -996,6 +991,30 @@ class SubtitleOverlay(QWidget):
 
         self._scroll.setWidget(self._msg_container)
         container_layout.addWidget(self._scroll)
+
+        # -- Analysis panel (lower half) --
+        analysis_bar = QHBoxLayout()
+        analysis_title = QLabel(t("analysis_panel"))
+        analysis_title.setStyleSheet("color:white; font-weight:bold; font-size:12px;")
+        analysis_bar.addWidget(analysis_title)
+        analysis_bar.addStretch()
+
+        self._analyze_btn = QPushButton(t("analysis_trigger"))
+        self._analyze_btn.setFixedHeight(22)
+        self._analyze_btn.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 8px; }")
+        self._analyze_btn.clicked.connect(self._on_analyze_clicked)
+        analysis_bar.addWidget(self._analyze_btn)
+
+        container_layout.addLayout(analysis_bar)
+
+        self._analysis_text = QTextEdit()
+        self._analysis_text.setReadOnly(True)
+        self._analysis_text.setMinimumHeight(120)
+        self._analysis_text.setStyleSheet(
+            "QTextEdit { background: rgba(0,0,0,180); color: white; "
+            "border: 1px solid #333; font-size: 12px; padding: 4px; }"
+        )
+        container_layout.addWidget(self._analysis_text)
 
         grip_row = QHBoxLayout()
         grip_row.addStretch()
@@ -1131,9 +1150,9 @@ class SubtitleOverlay(QWidget):
     def _on_update_asr_device(self, device: str):
         self._monitor.update_asr_device(device)
 
-    @pyqtSlot(int, str, str, str, float)
-    def _on_add_message(self, msg_id, timestamp, original, source_lang, asr_ms):
-        msg = ChatMessage(msg_id, timestamp, original, source_lang, asr_ms)
+    @pyqtSlot(int, str, str, str, float, str)
+    def _on_add_message(self, msg_id, timestamp, original, source_lang, asr_ms, speaker):
+        msg = ChatMessage(msg_id, timestamp, original, source_lang, asr_ms, speaker=speaker)
         self._messages[msg_id] = msg
         self._msg_layout.addWidget(msg)
 
@@ -1192,8 +1211,8 @@ class SubtitleOverlay(QWidget):
             msg.apply_style(s)
 
     # Thread-safe public API
-    def add_message(self, msg_id, timestamp, original, source_lang, asr_ms):
-        self.add_message_signal.emit(msg_id, timestamp, original, source_lang, asr_ms)
+    def add_message(self, msg_id, timestamp, original, source_lang, asr_ms, speaker=""):
+        self.add_message_signal.emit(msg_id, timestamp, original, source_lang, asr_ms, speaker)
 
     def update_translation(self, msg_id, translated, translate_ms):
         self.update_translation_signal.emit(msg_id, translated, translate_ms)
@@ -1213,13 +1232,35 @@ class SubtitleOverlay(QWidget):
         self.update_asr_device_signal.emit(device)
 
     def set_target_language(self, lang: str):
-        self._handle.set_target_language(lang)
+        pass  # No longer shown in overlay; kept for API compatibility
 
     def set_source_language(self, lang: str):
-        self._handle.set_source_language(lang)
+        pass  # No longer shown in overlay; kept for API compatibility
 
     def set_models(self, models: list, active_index: int = 0):
         self._handle.set_models(models, active_index)
 
+    def set_scenes(self, preset_names: list, active: str = ""):
+        self._handle.set_scenes(preset_names, active)
+
     def clear(self):
         self.clear_signal.emit()
+
+    def _on_analyze_clicked(self):
+        self.analyze_requested.emit()
+
+    def _on_update_analysis(self, text):
+        self._analysis_text.setMarkdown(text)
+        sb = self._analysis_text.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def _on_finish_analysis(self, text):
+        self._analysis_text.setMarkdown(text)
+
+    def update_analysis(self, text: str):
+        """Thread-safe streaming analysis update."""
+        self.update_analysis_signal.emit(text)
+
+    def finish_analysis(self, text: str):
+        """Thread-safe final analysis update."""
+        self.finish_analysis_signal.emit(text)
