@@ -63,6 +63,7 @@ class AudioCapture:
         self.sample_rate = sample_rate
         self.chunk_duration = chunk_duration
         self.audio_queue = queue.Queue(maxsize=100)
+        self.mic_queue = queue.Queue(maxsize=100)
         self._stream = None
         self._running = False
         self._device_name = device
@@ -387,8 +388,7 @@ class AudioCapture:
                 time.sleep(0.005)
                 continue
 
-            # Mix: take matching length from mic buffer
-            audio = loopback_audio
+            # Take matching length from mic buffer
             mic_rms = None
             if len(self._mic_buf) > 0:
                 n = len(loopback_audio)
@@ -400,8 +400,20 @@ class AudioCapture:
                     mic_chunk[: len(self._mic_buf)] = self._mic_buf
                     self._mic_buf = np.array([], dtype=np.float32)
                 mic_rms = float(np.sqrt(np.mean(mic_chunk**2)))
-                audio = loopback_audio + mic_chunk
 
+                # Put mic audio to separate queue (independent channel)
+                if len(mic_chunk) > 0:
+                    try:
+                        self.mic_queue.put_nowait(mic_chunk)
+                    except queue.Full:
+                        try:
+                            self.mic_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+                        self.mic_queue.put_nowait(mic_chunk)
+
+            # System audio goes to main queue (no mixing)
+            audio = loopback_audio
             try:
                 self.audio_queue.put_nowait((audio, mic_rms))
             except queue.Full:
@@ -435,6 +447,13 @@ class AudioCapture:
     def get_audio(self, timeout=1.0):
         try:
             return self.audio_queue.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def get_mic_audio(self, timeout=1.0):
+        """Return mic-only audio chunk, or None if timeout."""
+        try:
+            return self.mic_queue.get(timeout=timeout)
         except queue.Empty:
             return None
 
