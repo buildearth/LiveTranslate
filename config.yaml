@@ -53,6 +53,13 @@ translation:
     近期对话上下文：
     {context}
 
+analysis:
+  debounce_ms: 800
+  batch_threshold: 3
+  summary_threshold: 15
+  hard_max_vad_duration: 3.0
+  default_preset: "带货直播"
+
 subtitle:
   # Font family
   font_family: "Microsoft YaHei"
