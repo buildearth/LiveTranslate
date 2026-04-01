@@ -12,20 +12,26 @@ log = logging.getLogger("LiveTranslate.VAD")
 class VADProcessor:
     """Voice Activity Detection with multiple modes."""
 
-    # Class-level shared Silero model (loaded once, reused by all instances)
-    _shared_model = None
-    _shared_utils = None
+    # Class-level cached Silero model (downloaded once, deep-copied per instance)
+    _cached_model = None
+    _cached_utils = None
 
     @classmethod
     def _load_silero(cls):
-        if cls._shared_model is None:
-            cls._shared_model, cls._shared_utils = torch.hub.load(
+        """Load Silero VAD. Downloads once, returns a deep copy per call.
+
+        Each VADProcessor needs its own model copy because Silero VAD is stateful
+        (internal RNN hidden state) and not thread-safe.
+        """
+        import copy
+        if cls._cached_model is None:
+            cls._cached_model, cls._cached_utils = torch.hub.load(
                 repo_or_dir="snakers4/silero-vad",
                 model="silero_vad",
                 trust_repo=True,
             )
-            cls._shared_model.eval()
-        return cls._shared_model, cls._shared_utils
+            cls._cached_model.eval()
+        return copy.deepcopy(cls._cached_model), cls._cached_utils
 
     def __init__(
         self,
