@@ -384,33 +384,25 @@ class AudioCapture:
                 except Exception as e:
                     log.warning(f"Mic read error: {e}")
 
+            # Push mic chunks independently (fixed 32ms chunks, not tied to loopback)
+            mic_rms = None
+            mic_chunk_size = int(self.sample_rate * self.chunk_duration)
+            while len(self._mic_buf) >= mic_chunk_size:
+                mic_chunk = self._mic_buf[:mic_chunk_size]
+                self._mic_buf = self._mic_buf[mic_chunk_size:]
+                mic_rms = float(np.sqrt(np.mean(mic_chunk**2)))
+                try:
+                    self.mic_queue.put_nowait(mic_chunk)
+                except queue.Full:
+                    try:
+                        self.mic_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    self.mic_queue.put_nowait(mic_chunk)
+
             if loopback_audio is None:
                 time.sleep(0.005)
                 continue
-
-            # Take matching length from mic buffer
-            mic_rms = None
-            if len(self._mic_buf) > 0:
-                n = len(loopback_audio)
-                if len(self._mic_buf) >= n:
-                    mic_chunk = self._mic_buf[:n]
-                    self._mic_buf = self._mic_buf[n:]
-                else:
-                    mic_chunk = np.zeros(n, dtype=np.float32)
-                    mic_chunk[: len(self._mic_buf)] = self._mic_buf
-                    self._mic_buf = np.array([], dtype=np.float32)
-                mic_rms = float(np.sqrt(np.mean(mic_chunk**2)))
-
-                # Put mic audio to separate queue (independent channel)
-                if len(mic_chunk) > 0:
-                    try:
-                        self.mic_queue.put_nowait(mic_chunk)
-                    except queue.Full:
-                        try:
-                            self.mic_queue.get_nowait()
-                        except queue.Empty:
-                            pass
-                        self.mic_queue.put_nowait(mic_chunk)
 
             # System audio goes to main queue (no mixing)
             audio = loopback_audio
