@@ -1,7 +1,7 @@
 # LiveTranslate English UI strings
 
 # Overlay
-translating: "translating..."
+translating: "recognizing..."
 same_language: "(same language)"
 copy_original: "Copy Original"
 copy_translation: "Copy Translation"

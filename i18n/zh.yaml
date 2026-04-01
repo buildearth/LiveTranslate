@@ -1,7 +1,7 @@
 # LiveTranslate 中文 UI 字符串
 
 # 悬浮窗
-translating: "翻译中..."
+translating: "识别中..."
 same_language: "(相同语言)"
 copy_original: "复制原文"
 copy_translation: "复制译文"

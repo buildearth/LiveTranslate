@@ -239,16 +239,29 @@ class ChatMessage(QWidget):
         self._trans_label.setStyleSheet("background: transparent;")
         self._layout.addWidget(self._trans_label)
 
+    # Distinct colors for multiple speakers
+    _SPEAKER_COLORS = [
+        "#5B9BD5",  # blue
+        "#E06C75",  # red
+        "#D19A66",  # orange
+        "#C678DD",  # purple
+        "#56B6C2",  # cyan
+        "#BE5046",  # brown
+        "#E5C07B",  # yellow
+    ]
+    _speaker_color_map: dict[str, str] = {}
+
     def _build_header_html(self, s):
-        # Speaker tag color: blue for "对方", green for "我方", gray otherwise
         speaker_html = ""
         if self._speaker:
-            if self._speaker == "对方":
-                spk_color = "#5B9BD5"
-            elif self._speaker == "我方":
-                spk_color = "#70AD47"
+            if self._speaker == "我方":
+                spk_color = "#70AD47"  # green, always
             else:
-                spk_color = "#999"
+                # Assign stable color per speaker name
+                if self._speaker not in ChatMessage._speaker_color_map:
+                    idx = len(ChatMessage._speaker_color_map) % len(ChatMessage._SPEAKER_COLORS)
+                    ChatMessage._speaker_color_map[self._speaker] = ChatMessage._SPEAKER_COLORS[idx]
+                spk_color = ChatMessage._speaker_color_map[self._speaker]
             speaker_html = f'<span style="color:{spk_color};">[{self._speaker}]</span> '
         if self._compact_mode:
             return (

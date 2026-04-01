@@ -38,6 +38,7 @@ import torch  # noqa: F401
 from audio_capture import AudioCapture
 from vad_processor import VADProcessor
 from asr_engine import ASREngine
+from speaker_identifier import SpeakerIdentifier
 from translator import Translator, make_openai_client
 from dialogue_buffer import DialogueBuffer
 from analyzer import AnalysisScheduler
@@ -187,6 +188,9 @@ class LiveTranslateApp:
         self._dialogue_buffer = DialogueBuffer()
         self._analyzer = AnalysisScheduler(self._dialogue_buffer)
         self._compressor = SummaryCompressor(self._dialogue_buffer)
+
+        # Speaker identification for system audio
+        self._speaker_id = SpeakerIdentifier(device="cuda" if torch.cuda.is_available() else "cpu")
 
         # Dual VAD instances (created in start())
         self._vad_system = None
@@ -532,18 +536,19 @@ class LiveTranslateApp:
             except queue.Empty:
                 q.put_nowait((segment, speaker))
 
-    def _asr_worker(self, asr_queue, speaker_label):
-        """Thread: consume ASR queue -> transcribe -> push to dialogue buffer + UI."""
+    def _asr_worker(self, asr_queue, is_mic_channel: bool):
+        """Thread: consume ASR queue -> transcribe -> identify speaker -> push to buffer + UI."""
+        channel_name = "mic" if is_mic_channel else "system"
         while self._running:
             try:
                 item = asr_queue.get(timeout=1.0)
             except queue.Empty:
                 continue
-            segment, speaker = item
+            segment, default_speaker = item
             seg_len = len(segment) / 16000
 
             if not self._asr_ready or self._asr is None:
-                log.debug("ASR not ready, dropping %s segment", speaker)
+                log.debug("ASR not ready, dropping %s segment", channel_name)
                 continue
 
             asr_start = time.perf_counter()
@@ -551,7 +556,7 @@ class LiveTranslateApp:
                 try:
                     result = self._asr.transcribe(segment)
                 except Exception as e:
-                    log.error("ASR error (%s): %s", speaker, e)
+                    log.error("ASR error (%s): %s", channel_name, e)
                     continue
             asr_ms = (time.perf_counter() - asr_start) * 1000
 
@@ -574,8 +579,16 @@ class LiveTranslateApp:
             asr_lang_setting = self._panel.get_settings().get("asr_language", "auto") if self._panel else "auto"
             if asr_lang_setting != "auto" and source_lang != asr_lang_setting:
                 log.info("Language filter (%s): expected '%s' but got '%s', discarding: %s",
-                         speaker, asr_lang_setting, source_lang, text[:60])
+                         channel_name, asr_lang_setting, source_lang, text[:60])
                 continue
+
+            # Speaker identification: mic channel = fixed "我方", system channel = diarization
+            if is_mic_channel:
+                speaker = "我方"
+            elif self._speaker_id.ready:
+                speaker = self._speaker_id.identify(segment)
+            else:
+                speaker = default_speaker
 
             self._asr_count += 1
             log.info("ASR [%s] [%s] (%.0fms): %s", speaker, source_lang, asr_ms, text)
@@ -644,6 +657,10 @@ class LiveTranslateApp:
         self._vad_system = VADProcessor(**vad_kwargs)
         self._vad_mic = VADProcessor(**vad_kwargs)
 
+        # Load speaker identification model
+        if not self._speaker_id.ready:
+            self._speaker_id.load()
+
         self._audio.start()
 
         # Audio pipeline threads
@@ -652,11 +669,11 @@ class LiveTranslateApp:
         self._audio_thread_system.start()
         self._audio_thread_mic.start()
 
-        # ASR worker threads
+        # ASR worker threads (is_mic_channel: False=system with diarization, True=mic fixed "我方")
         self._asr_thread_system = threading.Thread(
-            target=self._asr_worker, args=(self._asr_queue_system, "\u5bf9\u65b9"), daemon=True)
+            target=self._asr_worker, args=(self._asr_queue_system, False), daemon=True)
         self._asr_thread_mic = threading.Thread(
-            target=self._asr_worker, args=(self._asr_queue_mic, "\u6211\u65b9"), daemon=True)
+            target=self._asr_worker, args=(self._asr_queue_mic, True), daemon=True)
         self._asr_thread_system.start()
         self._asr_thread_mic.start()
 
