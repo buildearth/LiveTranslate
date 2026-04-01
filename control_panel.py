@@ -569,6 +569,9 @@ class ControlPanel(QWidget):
         self._pe_extra.setMaximumHeight(60)
         eg_layout.addRow(t("preset_extra") + ":", self._pe_extra)
 
+        self._pe_cumulative_check = QCheckBox(t("preset_cumulative"))
+        eg_layout.addRow(self._pe_cumulative_check)
+
         self._pe_advanced_check = QCheckBox(t("preset_advanced"))
         self._pe_advanced_check.toggled.connect(self._on_preset_advanced_toggle)
         eg_layout.addRow(self._pe_advanced_check)
@@ -1143,6 +1146,7 @@ class ControlPanel(QWidget):
         for tag, cb in self._pe_output_checks.items():
             cb.setChecked(tag in preset.output_tags)
         self._pe_extra.setPlainText(preset.extra_instructions)
+        self._pe_cumulative_check.setChecked(getattr(preset, "cumulative", False))
         self._pe_advanced_check.setChecked(preset.is_advanced)
         self._pe_advanced_edit.setPlainText(preset.advanced_prompt)
         self._pe_advanced_edit.setVisible(preset.is_advanced)
@@ -1194,6 +1198,7 @@ class ControlPanel(QWidget):
         preset.focus_tags = [tag for tag, cb in self._pe_focus_checks.items() if cb.isChecked()]
         preset.output_tags = [tag for tag, cb in self._pe_output_checks.items() if cb.isChecked()]
         preset.extra_instructions = self._pe_extra.toPlainText().strip()
+        preset.cumulative = self._pe_cumulative_check.isChecked()
         preset.is_advanced = self._pe_advanced_check.isChecked()
         preset.advanced_prompt = self._pe_advanced_edit.toPlainText().strip()
         if new_name != old_name:

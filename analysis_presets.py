@@ -24,6 +24,7 @@ class AnalysisPreset:
     extra_instructions: str = ""
     is_advanced: bool = False
     advanced_prompt: str = ""
+    cumulative: bool = False  # True = accumulative summary mode (like meeting notes)
     builtin: bool = False  # True for built-in presets (not editable)
 
     def build_prompt(self) -> str:
@@ -54,6 +55,7 @@ class AnalysisPreset:
             "extra_instructions": self.extra_instructions,
             "is_advanced": self.is_advanced,
             "advanced_prompt": self.advanced_prompt,
+            "cumulative": self.cumulative,
         }
 
     @classmethod
@@ -66,6 +68,7 @@ class AnalysisPreset:
             extra_instructions=d.get("extra_instructions", ""),
             is_advanced=d.get("is_advanced", False),
             advanced_prompt=d.get("advanced_prompt", ""),
+            cumulative=d.get("cumulative", False),
         )
 
 
@@ -75,13 +78,16 @@ ANALYSIS_PRESETS: dict[str, AnalysisPreset] = {
         name="纯总结",
         role="",
         is_advanced=True,
+        cumulative=True,
         advanced_prompt=(
-            "你是一个对话总结助手。只输出对话内容的总结，不要分析、不要建议、不要评论。\n"
+            "你是一个实时对话总结助手，类似飞书会议纪要。\n"
+            "你会收到「当前总结」和「新增对话」，请将新内容融合到总结中输出完整的更新版总结。\n"
             "要求：\n"
-            "- 只总结双方说了什么，用3-5个要点\n"
-            "- 每个要点一行，不超过20字\n"
-            "- 不要加任何标题、分析或建议\n"
-            "- 总输出不超过100字"
+            "- 只做事实总结，不分析、不建议、不评论\n"
+            "- 按话题/时间段分要点，保留所有重要信息\n"
+            "- 新内容自然融入已有结构，不重复已有要点\n"
+            "- 如果当前总结为空，直接根据新对话生成总结\n"
+            "- 输出纯文本要点列表，不超过500字"
         ),
         builtin=True,
     ),

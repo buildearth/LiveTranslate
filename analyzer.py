@@ -65,6 +65,7 @@ class AnalysisScheduler:
     def set_preset(self, preset: AnalysisPreset):
         with self._lock:
             self._preset = preset
+            self._last_analysis_text = ""  # reset cumulative state on preset switch
 
     def start(self):
         if self._running:
@@ -157,13 +158,24 @@ class AnalysisScheduler:
             self.on_analysis_start()
 
         system_prompt = preset.build_prompt()
+        is_cumulative = getattr(preset, "cumulative", False)
         summary = self._buffer.summary
 
         user_parts = []
-        if summary:
-            user_parts.append(f"## 对话摘要\n{summary}")
-        user_parts.append(f"## 最新对话\n{format_utterances(new_utterances)}")
-        user_parts.append("请基于以上对话给出分析和建议。")
+        if is_cumulative:
+            # Cumulative mode: pass previous result as "current summary" to be updated
+            prev_summary = self._last_analysis_text
+            if prev_summary:
+                user_parts.append(f"## 当前总结\n{prev_summary}")
+            else:
+                user_parts.append("## 当前总结\n（暂无，请根据新对话生成初始总结）")
+            user_parts.append(f"## 新增对话\n{format_utterances(new_utterances)}")
+            user_parts.append("请输出更新后的完整总结。")
+        else:
+            if summary:
+                user_parts.append(f"## 对话摘要\n{summary}")
+            user_parts.append(f"## 最新对话\n{format_utterances(new_utterances)}")
+            user_parts.append("请基于以上对话给出分析和建议。")
         user_content = "\n\n".join(user_parts)
 
         messages = [
@@ -171,11 +183,14 @@ class AnalysisScheduler:
             {"role": "user", "content": user_content},
         ]
 
+        # Cumulative mode needs more tokens (full summary output)
+        max_tokens = 600 if is_cumulative else 200
+
         try:
             stream = client.chat.completions.create(
                 model=model,
                 messages=messages,
-                max_tokens=200,
+                max_tokens=max_tokens,
                 temperature=0.3,
                 stream=True,
                 stream_options={"include_usage": True},
