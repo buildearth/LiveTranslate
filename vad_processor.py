@@ -12,6 +12,21 @@ log = logging.getLogger("LiveTranslate.VAD")
 class VADProcessor:
     """Voice Activity Detection with multiple modes."""
 
+    # Class-level shared Silero model (loaded once, reused by all instances)
+    _shared_model = None
+    _shared_utils = None
+
+    @classmethod
+    def _load_silero(cls):
+        if cls._shared_model is None:
+            cls._shared_model, cls._shared_utils = torch.hub.load(
+                repo_or_dir="snakers4/silero-vad",
+                model="silero_vad",
+                trust_repo=True,
+            )
+            cls._shared_model.eval()
+        return cls._shared_model, cls._shared_utils
+
     def __init__(
         self,
         sample_rate=16000,
@@ -29,12 +44,7 @@ class VADProcessor:
         self._chunk_duration = chunk_duration
         self.mode = "silero"  # "silero", "energy", "disabled"
 
-        self._model, self._utils = torch.hub.load(
-            repo_or_dir="snakers4/silero-vad",
-            model="silero_vad",
-            trust_repo=True,
-        )
-        self._model.eval()
+        self._model, self._utils = VADProcessor._load_silero()
 
         self._speech_buffer = []
         self._confidence_history = []  # per-chunk confidence, synced with _speech_buffer
