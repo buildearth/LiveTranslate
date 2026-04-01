@@ -1,8 +1,9 @@
 # analyzer.py
-"""Analysis scheduler: debounce + latest-wins + manual trigger with streaming output."""
+"""Analysis scheduler: debounce + min-display-time + manual trigger with streaming output."""
 
 import logging
 import threading
+import time
 
 from openai import OpenAI
 
@@ -16,14 +17,15 @@ log = logging.getLogger(__name__)
 class AnalysisScheduler:
     """Manages AI analysis timing and API calls.
 
-    - Auto-trigger: debounce 800ms or batch >= 3 sentences
-    - Latest-wins: if API busy, queue accumulates, fires immediately after current finishes
-    - Manual trigger: skips debounce, interrupts stale requests
+    - Auto-trigger: debounce 3s or batch >= 5 sentences
+    - Min display time: previous analysis must be visible for MIN_DISPLAY_S before replacement
+    - Manual trigger: skips debounce and display time, fires immediately
     - Streaming output via callback
     """
 
-    DEBOUNCE_MS = 800
-    BATCH_THRESHOLD = 3
+    DEBOUNCE_MS = 3000
+    BATCH_THRESHOLD = 5
+    MIN_DISPLAY_S = 8.0  # seconds to keep analysis visible before allowing replacement
 
     def __init__(self, buffer: DialogueBuffer):
         self._buffer = buffer
@@ -41,16 +43,19 @@ class AnalysisScheduler:
         self._stale = False  # True = current request result should be discarded
         self._debounce_timer: threading.Timer | None = None
         self._pending_count = 0  # utterances arrived since last analysis
+        self._last_analysis_done_time = 0.0  # when last analysis finished displaying
+        self._manual_trigger = False  # True when user clicked manual trigger
 
         # Callbacks (set by main.py)
         self.on_stream_chunk = None    # callable(str) - partial analysis text
-        self.on_stream_done = None     # callable(str) - final analysis text
+        self.on_stream_done = None     # callable(str, str) - (new_text, prev_text) for history
         self.on_analysis_start = None  # callable()
 
         # Stats
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.analysis_count = 0
+        self._last_analysis_text = ""  # keep previous analysis for history display
 
     def set_client(self, client: OpenAI, model: str):
         with self._lock:
@@ -78,8 +83,9 @@ class AnalysisScheduler:
             self._thread = None
 
     def trigger_manual(self):
-        """Manual trigger: skip debounce, mark current request stale, fire immediately."""
+        """Manual trigger: skip debounce and min display time, fire immediately."""
         self._cancel_debounce()
+        self._manual_trigger = True
         if self._api_busy:
             self._stale = True
         self._request_event.set()
@@ -115,6 +121,18 @@ class AnalysisScheduler:
             self._request_event.clear()
             if not self._running:
                 break
+
+            # Enforce minimum display time (unless manual trigger)
+            if not self._manual_trigger and self._last_analysis_done_time > 0:
+                elapsed = time.time() - self._last_analysis_done_time
+                remaining = self.MIN_DISPLAY_S - elapsed
+                if remaining > 0:
+                    # Wait for display time, then re-check
+                    time.sleep(remaining)
+                    if not self._running:
+                        break
+
+            self._manual_trigger = False
             pending = self._buffer.take_pending()
             if not pending:
                 continue
@@ -157,7 +175,7 @@ class AnalysisScheduler:
             stream = client.chat.completions.create(
                 model=model,
                 messages=messages,
-                max_tokens=512,
+                max_tokens=200,
                 temperature=0.3,
                 stream=True,
                 stream_options={"include_usage": True},
@@ -181,8 +199,11 @@ class AnalysisScheduler:
             if not self._stale:
                 final = "".join(chunks)
                 self.analysis_count += 1
+                prev = self._last_analysis_text
+                self._last_analysis_text = final
+                self._last_analysis_done_time = time.time()
                 if self.on_stream_done:
-                    self.on_stream_done(final)
+                    self.on_stream_done(final, prev)
         except Exception as e:
             log.error("Analysis API error: %s", e)
         finally:

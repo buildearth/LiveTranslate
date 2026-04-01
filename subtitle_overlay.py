@@ -867,6 +867,7 @@ class SubtitleOverlay(QWidget):
     update_asr_device_signal = pyqtSignal(str)
     # Analysis signals (thread-safe)
     update_analysis_signal = pyqtSignal(str)
+    finish_analysis_history_signal = pyqtSignal(str, str)  # new_text, prev_text
     finish_analysis_signal = pyqtSignal(str)
 
     settings_requested = pyqtSignal()
@@ -907,6 +908,7 @@ class SubtitleOverlay(QWidget):
         self.update_asr_device_signal.connect(self._on_update_asr_device)
         self.update_analysis_signal.connect(self._on_update_analysis)
         self.finish_analysis_signal.connect(self._on_finish_analysis)
+        self.finish_analysis_history_signal.connect(self._on_finish_analysis_history)
 
     def _setup_ui(self):
         self.setWindowFlags(
@@ -1257,10 +1259,25 @@ class SubtitleOverlay(QWidget):
     def _on_finish_analysis(self, text):
         self._analysis_text.setMarkdown(text)
 
+    def _on_finish_analysis_history(self, new_text, prev_text):
+        """Show new analysis with previous analysis in gray above."""
+        if prev_text:
+            html = (
+                '<div style="color:#888; border-bottom:1px solid #444; padding-bottom:4px; margin-bottom:4px;">'
+                f'{prev_text}</div>'
+                f'<div>{new_text}</div>'
+            )
+            self._analysis_text.setHtml(html)
+        else:
+            self._analysis_text.setMarkdown(new_text)
+
     def update_analysis(self, text: str):
         """Thread-safe streaming analysis update."""
         self.update_analysis_signal.emit(text)
 
-    def finish_analysis(self, text: str):
-        """Thread-safe final analysis update."""
-        self.finish_analysis_signal.emit(text)
+    def finish_analysis(self, text: str, prev_text: str = ""):
+        """Thread-safe final analysis update with history."""
+        if prev_text:
+            self.finish_analysis_history_signal.emit(text, prev_text)
+        else:
+            self.finish_analysis_signal.emit(text)

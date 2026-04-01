@@ -42,7 +42,7 @@ class AnalysisPreset:
             parts.append(f"\n输出需包含：{', '.join(self.output_tags)}。")
         if self.extra_instructions:
             parts.append(f"\n{self.extra_instructions}")
-        parts.append("\n请用简洁的结构化格式输出（使用 ## 标题分段），便于快速阅读。")
+        parts.append("\n【格式要求】用3-5个要点输出，每个要点一行，不超过20字。总输出不超过150字。不要用标题，直接列要点。")
         return "\n".join(parts)
 
     def to_dict(self) -> dict:
@@ -71,6 +71,20 @@ class AnalysisPreset:
 
 # Built-in presets
 ANALYSIS_PRESETS: dict[str, AnalysisPreset] = {
+    "纯总结": AnalysisPreset(
+        name="纯总结",
+        role="",
+        is_advanced=True,
+        advanced_prompt=(
+            "你是一个对话总结助手。只输出对话内容的总结，不要分析、不要建议、不要评论。\n"
+            "要求：\n"
+            "- 只总结双方说了什么，用3-5个要点\n"
+            "- 每个要点一行，不超过20字\n"
+            "- 不要加任何标题、分析或建议\n"
+            "- 总输出不超过100字"
+        ),
+        builtin=True,
+    ),
     "带货直播": AnalysisPreset(
         name="带货直播",
         role="直播带货分析师",

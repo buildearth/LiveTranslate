@@ -25,7 +25,7 @@ class VADProcessor:
         self.energy_threshold = 0.02
         self.min_speech_samples = int(min_speech_duration * sample_rate)
         self.max_speech_samples = int(max_speech_duration * sample_rate)
-        self._hard_max_samples = int(3.0 * sample_rate)  # 3s hard limit
+        self._hard_max_samples = int(max_speech_duration * sample_rate)  # same as max, no forced early split
         self._chunk_duration = chunk_duration
         self.mode = "silero"  # "silero", "energy", "disabled"
 
@@ -184,12 +184,6 @@ class VADProcessor:
         else:
             # Not speaking: feed pre-speech ring buffer
             self._pre_buffer.append(audio_chunk)
-
-        # Hard max: force split at 3s regardless, using best pause point
-        if self._speech_samples >= self._hard_max_samples:
-            seg = self._split_at_best_pause()
-            if seg is not None:
-                return seg
 
         # Force segment if max duration reached — backtrack to find best split point
         if self._speech_samples >= self.max_speech_samples:

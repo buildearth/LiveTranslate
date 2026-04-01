@@ -598,9 +598,9 @@ class LiveTranslateApp:
             if self._overlay:
                 self._overlay.update_analysis(text)
 
-        def on_stream_done(text):
+        def on_stream_done(text, prev_text=""):
             if self._overlay:
-                self._overlay.finish_analysis(text)
+                self._overlay.finish_analysis(text, prev_text)
 
         self._analyzer.on_stream_chunk = on_stream_chunk
         self._analyzer.on_stream_done = on_stream_done
