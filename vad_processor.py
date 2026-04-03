@@ -25,11 +25,21 @@ class VADProcessor:
         """
         import copy
         if cls._cached_model is None:
-            cls._cached_model, cls._cached_utils = torch.hub.load(
-                repo_or_dir="snakers4/silero-vad",
-                model="silero_vad",
-                trust_repo=True,
-            )
+            # Try local cache first to avoid network dependency
+            try:
+                cls._cached_model, cls._cached_utils = torch.hub.load(
+                    repo_or_dir="snakers4/silero-vad",
+                    model="silero_vad",
+                    trust_repo=True,
+                    source="local",
+                )
+            except Exception:
+                log.info("Silero VAD not in local cache, downloading from GitHub...")
+                cls._cached_model, cls._cached_utils = torch.hub.load(
+                    repo_or_dir="snakers4/silero-vad",
+                    model="silero_vad",
+                    trust_repo=True,
+                )
             cls._cached_model.eval()
         return copy.deepcopy(cls._cached_model), cls._cached_utils
 
