@@ -93,6 +93,7 @@ class SummaryCompressor:
                 ],
                 max_tokens=600,
                 temperature=0.3,
+                timeout=30,
             )
             new_summary = resp.choices[0].message.content.strip()
             self._buffer.update_summary(new_summary)
