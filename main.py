@@ -6,6 +6,7 @@ Real-time audio translation using WASAPI loopback + faster-whisper + LLM.
 import sys
 import signal
 import logging
+import itertools
 import threading
 import queue
 import yaml
@@ -182,7 +183,7 @@ class LiveTranslateApp:
         self._total_completion_tokens = 0
         self._input_price = 0.0
         self._output_price = 0.0
-        self._msg_counter = 0
+        self._msg_counter = itertools.count(1)
 
         # Dual-channel async architecture
         self._dialogue_buffer = DialogueBuffer()
@@ -230,15 +231,16 @@ class LiveTranslateApp:
             self._vad_mic.update_settings(settings)
         if "style" in settings and self._overlay:
             self._overlay.apply_style(settings["style"])
-        if "asr_language" in settings and self._asr:
-            self._asr.set_language(settings["asr_language"])
+        asr_ref = self._asr
+        if "asr_language" in settings and asr_ref:
+            asr_ref.set_language(settings["asr_language"])
         # ASR compute device change: try in-place migration first
         new_device = settings.get("asr_device")
         if new_device and new_device != self._asr_device:
             old_device = self._asr_device
             self._asr_device = new_device
-            if self._asr is not None and hasattr(self._asr, "to_device"):
-                result = self._asr.to_device(new_device)
+            if asr_ref is not None and hasattr(asr_ref, "to_device"):
+                result = asr_ref.to_device(new_device)
                 if result is not False:
                     log.info(f"ASR device migrated: {old_device} -> {new_device}")
                     if self._overlay:
@@ -461,7 +463,8 @@ class LiveTranslateApp:
             self._asr_type = None
             return
 
-        self._asr = new_asr[0]
+        with self._asr_lock:
+            self._asr = new_asr[0]
         self._asr_type = engine_type
         if self._panel:
             asr_lang = self._panel.get_settings().get("asr_language", "auto")
@@ -609,8 +612,7 @@ class LiveTranslateApp:
             self._dialogue_buffer.add(speaker, text)
 
             # Update UI — show in scrolling area
-            self._msg_counter += 1
-            msg_id = self._msg_counter
+            msg_id = next(self._msg_counter)
             ts = time.strftime("%H:%M:%S")
             if self._overlay:
                 self._overlay.add_message(msg_id, ts, text, source_lang, asr_ms, speaker)
@@ -679,7 +681,7 @@ class LiveTranslateApp:
             return
         self._running = True
         self._paused = False
-        self._msg_counter = 0
+        self._msg_counter = itertools.count(1)
 
         # Initialize dual VAD (reuse existing VAD config)
         vad_kwargs = dict(
