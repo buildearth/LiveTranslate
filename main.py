@@ -525,6 +525,11 @@ class LiveTranslateApp:
 
     def _enqueue_asr(self, q, segment, speaker):
         """Push segment to ASR queue with backpressure handling."""
+        # Cap segment length to avoid very slow ASR inference
+        max_samples = 30 * 16000  # 30 seconds
+        if len(segment) > max_samples:
+            segment = segment[-max_samples:]
+            log.warning("Segment too long for %s, trimmed to 30s", speaker)
         try:
             q.put_nowait((segment, speaker))
         except queue.Full:
@@ -564,6 +569,8 @@ class LiveTranslateApp:
                 log.error("ASR error (%s): %s", channel_name, e)
                 continue
             asr_ms = (time.perf_counter() - asr_start) * 1000
+            if asr_ms > 10000:
+                log.warning("ASR slow (%s): %.0fms for %.1fs segment", channel_name, asr_ms, seg_len)
 
             if result is None:
                 continue
