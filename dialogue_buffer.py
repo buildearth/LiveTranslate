@@ -16,6 +16,8 @@ class Utterance:
 class DialogueBuffer:
     """Collects utterances from dual ASR channels, manages pending analysis queue and rolling summary."""
 
+    MAX_UTTERANCES = 2000  # keep last N utterances; older ones covered by summary
+
     def __init__(self):
         self._lock = threading.Lock()
         self._utterances: list[Utterance] = []
@@ -32,6 +34,14 @@ class DialogueBuffer:
         with self._lock:
             self._utterances.append(u)
             self._pending.append(u)
+            # Trim old utterances (already covered by summary)
+            if len(self._utterances) > self.MAX_UTTERANCES:
+                trim = len(self._utterances) - self.MAX_UTTERANCES
+                # Only trim what's already summarized
+                safe_trim = min(trim, self._summary_cursor)
+                if safe_trim > 0:
+                    self._utterances = self._utterances[safe_trim:]
+                    self._summary_cursor -= safe_trim
         for fn in self._listeners:
             try:
                 fn(u)
