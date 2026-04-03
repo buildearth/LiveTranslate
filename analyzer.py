@@ -136,8 +136,9 @@ class AnalysisScheduler:
                 elapsed = time.time() - self._last_analysis_done_time
                 remaining = self.MIN_DISPLAY_S - elapsed
                 if remaining > 0:
-                    # Wait for display time, then re-check
-                    time.sleep(remaining)
+                    # Interruptible wait — wakes on manual trigger or stop
+                    self._request_event.wait(timeout=remaining)
+                    self._request_event.clear()
                     if not self._running:
                         break
 
