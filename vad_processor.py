@@ -24,16 +24,24 @@ class VADProcessor:
         (internal RNN hidden state) and not thread-safe.
         """
         import copy
+        import os
         if cls._cached_model is None:
-            # Try local cache first to avoid network dependency
-            try:
+            # Try local cache first to avoid network dependency on startup
+            hub_dir = torch.hub.get_dir()
+            local_repo = None
+            if os.path.isdir(hub_dir):
+                for name in os.listdir(hub_dir):
+                    if name.startswith("snakers4_silero-vad") and os.path.isdir(os.path.join(hub_dir, name)):
+                        local_repo = os.path.join(hub_dir, name)
+                        break
+            if local_repo:
+                log.info("Loading Silero VAD from local cache: %s", local_repo)
                 cls._cached_model, cls._cached_utils = torch.hub.load(
-                    repo_or_dir="snakers4/silero-vad",
+                    repo_or_dir=local_repo,
                     model="silero_vad",
-                    trust_repo=True,
                     source="local",
                 )
-            except Exception:
+            else:
                 log.info("Silero VAD not in local cache, downloading from GitHub...")
                 cls._cached_model, cls._cached_utils = torch.hub.load(
                     repo_or_dir="snakers4/silero-vad",
