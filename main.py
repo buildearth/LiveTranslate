@@ -195,8 +195,8 @@ class LiveTranslateApp:
         # Dual VAD instances (created in start())
         self._vad_system = None
         self._vad_mic = None
-        self._asr_queue_system = queue.Queue(maxsize=10)
-        self._asr_queue_mic = queue.Queue(maxsize=10)
+        self._asr_queue_system = queue.Queue(maxsize=30)
+        self._asr_queue_mic = queue.Queue(maxsize=30)
 
         # Thread references
         self._audio_thread_system = None
@@ -528,13 +528,16 @@ class LiveTranslateApp:
         try:
             q.put_nowait((segment, speaker))
         except queue.Full:
+            # Drop oldest segment to make room (avoid merging which creates slow mega-segments)
             try:
-                old_seg, _old_speaker = q.get_nowait()
-                merged = np.concatenate([old_seg, segment])
-                q.put_nowait((merged, speaker))
-                log.warning("ASR queue full for %s, merged segments", speaker)
+                q.get_nowait()
             except queue.Empty:
+                pass
+            try:
                 q.put_nowait((segment, speaker))
+            except queue.Full:
+                pass
+            log.warning("ASR queue full for %s, dropped oldest segment", speaker)
 
     def _asr_worker(self, asr_queue, is_mic_channel: bool):
         """Thread: consume ASR queue -> transcribe -> identify speaker -> push to buffer + UI."""
