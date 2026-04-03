@@ -1237,6 +1237,8 @@ def main():
     overlay.quit_requested.connect(on_quit)
     overlay.scene_changed.connect(live_trans._on_scene_changed)
     overlay.analyze_requested.connect(live_trans._analyzer.trigger_manual)
+    overlay.clear_analysis_history.connect(live_trans._analyzer.clear_history)
+    overlay.retain_history_changed.connect(live_trans._analyzer.set_retain_history)
     overlay.clear_signal.connect(lambda: live_trans._dialogue_buffer.clear())
 
     tray.setContextMenu(menu)

@@ -888,6 +888,8 @@ class SubtitleOverlay(QWidget):
     source_language_changed = pyqtSignal(str)  # kept for API compatibility; no longer emitted
     model_switch_requested = pyqtSignal(int)
     analyze_requested = pyqtSignal()
+    clear_analysis_history = pyqtSignal()  # clear analyzer's accumulated history
+    retain_history_changed = pyqtSignal(bool)  # toggle analysis history retention
     scene_changed = pyqtSignal(str)
     start_requested = pyqtSignal()
     stop_requested = pyqtSignal()
@@ -1019,6 +1021,23 @@ class SubtitleOverlay(QWidget):
         self._analyze_btn.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 8px; }")
         self._analyze_btn.clicked.connect(self._on_analyze_clicked)
         analysis_bar.addWidget(self._analyze_btn)
+
+        self._retain_history_btn = QPushButton(t("analysis_retain_history"))
+        self._retain_history_btn.setFixedHeight(22)
+        self._retain_history_btn.setCheckable(True)
+        self._retain_history_btn.setChecked(True)
+        self._retain_history_btn.setStyleSheet(
+            "QPushButton { font-size: 10px; padding: 2px 6px; }"
+            "QPushButton:checked { background: rgba(80,180,80,80); color: #8f8; }"
+        )
+        self._retain_history_btn.toggled.connect(self._on_retain_history_toggled)
+        analysis_bar.addWidget(self._retain_history_btn)
+
+        self._clear_history_btn = QPushButton(t("analysis_clear_history"))
+        self._clear_history_btn.setFixedHeight(22)
+        self._clear_history_btn.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 6px; }")
+        self._clear_history_btn.clicked.connect(self._on_clear_history_clicked)
+        analysis_bar.addWidget(self._clear_history_btn)
 
         container_layout.addLayout(analysis_bar)
 
@@ -1263,6 +1282,20 @@ class SubtitleOverlay(QWidget):
 
     def _on_analyze_clicked(self):
         self.analyze_requested.emit()
+
+    def _on_retain_history_toggled(self, checked):
+        self._retain_history_btn.setText(
+            t("analysis_retain_history") if checked else t("analysis_no_history")
+        )
+        self.retain_history_changed.emit(checked)
+
+    def _on_clear_history_clicked(self):
+        self._analysis_text.clear()
+        self.clear_analysis_history.emit()
+
+    @property
+    def retain_analysis_history(self) -> bool:
+        return self._retain_history_btn.isChecked()
 
     def _on_update_analysis(self, text):
         self._analysis_text.setMarkdown(text)

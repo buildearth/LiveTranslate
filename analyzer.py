@@ -56,6 +56,7 @@ class AnalysisScheduler:
         self.completion_tokens = 0
         self.analysis_count = 0
         self._last_analysis_text = ""  # keep previous analysis for history display
+        self._retain_history = True     # whether to keep _last_analysis_text across analyses
 
     def set_client(self, client: OpenAI, model: str):
         with self._lock:
@@ -66,6 +67,13 @@ class AnalysisScheduler:
         with self._lock:
             self._preset = preset
             self._last_analysis_text = ""  # reset cumulative state on preset switch
+
+    def set_retain_history(self, retain: bool):
+        self._retain_history = retain
+
+    def clear_history(self):
+        """Clear accumulated analysis history."""
+        self._last_analysis_text = ""
 
     def start(self):
         if self._running:
@@ -214,8 +222,12 @@ class AnalysisScheduler:
             if not self._stale:
                 final = "".join(chunks)
                 self.analysis_count += 1
-                prev = self._last_analysis_text
-                self._last_analysis_text = final
+                if self._retain_history:
+                    prev = self._last_analysis_text
+                    self._last_analysis_text = final
+                else:
+                    prev = ""
+                    self._last_analysis_text = ""
                 self._last_analysis_done_time = time.time()
                 if self.on_stream_done:
                     self.on_stream_done(final, prev)
