@@ -552,12 +552,14 @@ class LiveTranslateApp:
                 continue
 
             asr_start = time.perf_counter()
-            with self._asr_lock:
-                try:
-                    result = self._asr.transcribe(segment)
-                except Exception as e:
-                    log.error("ASR error (%s): %s", channel_name, e)
-                    continue
+            asr_ref = self._asr  # snapshot; may become None during switch
+            if asr_ref is None:
+                continue
+            try:
+                result = asr_ref.transcribe(segment)
+            except Exception as e:
+                log.error("ASR error (%s): %s", channel_name, e)
+                continue
             asr_ms = (time.perf_counter() - asr_start) * 1000
 
             if result is None:
