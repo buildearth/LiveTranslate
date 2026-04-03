@@ -289,6 +289,12 @@ class ChatMessage(QWidget):
             self._flush_streaming()
             self._streaming_timer.start()
 
+    def update_speaker(self, speaker: str):
+        """Update speaker label after async identification."""
+        self._speaker = speaker
+        s = self._current_style
+        self._header_label.setText(self._build_header_html(s))
+
     def _flush_streaming(self):
         text = getattr(self, "_pending_streaming", None)
         if text is None:
@@ -873,6 +879,7 @@ class SubtitleOverlay(QWidget):
     add_message_signal = pyqtSignal(int, str, str, str, float, str)  # + speaker
     update_translation_signal = pyqtSignal(int, str, float)
     update_streaming_signal = pyqtSignal(int, str)
+    update_speaker_signal = pyqtSignal(int, str)  # msg_id, speaker
     clear_signal = pyqtSignal()
     # Monitor signals (thread-safe)
     update_monitor_signal = pyqtSignal(float, float, object)
@@ -917,6 +924,7 @@ class SubtitleOverlay(QWidget):
         self.add_message_signal.connect(self._on_add_message)
         self.update_translation_signal.connect(self._on_update_translation)
         self.update_streaming_signal.connect(self._on_update_streaming)
+        self.update_speaker_signal.connect(self._on_update_speaker)
         self.clear_signal.connect(self._on_clear)
         self.update_monitor_signal.connect(self._on_update_monitor)
         self.update_stats_signal.connect(self._on_update_stats)
@@ -1209,6 +1217,11 @@ class SubtitleOverlay(QWidget):
         msg = self._messages.get(msg_id)
         if msg:
             msg.update_streaming(partial_text)
+
+    def _on_update_speaker(self, msg_id, speaker):
+        msg = self._messages.get(msg_id)
+        if msg:
+            msg.update_speaker(speaker)
 
     @pyqtSlot()
     def _on_clear(self):

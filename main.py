@@ -197,12 +197,14 @@ class LiveTranslateApp:
         self._vad_mic = None
         self._asr_queue_system = queue.Queue(maxsize=30)
         self._asr_queue_mic = queue.Queue(maxsize=30)
+        self._speaker_queue = queue.Queue(maxsize=50)
 
         # Thread references
         self._audio_thread_system = None
         self._audio_thread_mic = None
         self._asr_thread_system = None
         self._asr_thread_mic = None
+        self._speaker_thread = None
 
     def set_overlay(self, overlay: SubtitleOverlay):
         self._overlay = overlay
@@ -594,13 +596,11 @@ class LiveTranslateApp:
                          channel_name, asr_lang_setting, source_lang, text[:60])
                 continue
 
-            # Speaker identification: mic channel = fixed "我方", system channel = diarization
+            # Speaker identification: mic = fixed "我方", system = async diarization
             if is_mic_channel:
                 speaker = "我方"
-            elif self._speaker_id.ready:
-                speaker = self._speaker_id.identify(segment)
             else:
-                speaker = default_speaker
+                speaker = default_speaker  # "对方" initially
 
             self._asr_count += 1
             log.info("ASR [%s] [%s] (%.0fms): %s", speaker, source_lang, asr_ms, text)
@@ -614,6 +614,29 @@ class LiveTranslateApp:
             ts = time.strftime("%H:%M:%S")
             if self._overlay:
                 self._overlay.add_message(msg_id, ts, text, source_lang, asr_ms, speaker)
+
+            # Async speaker identification for system channel
+            if not is_mic_channel and self._speaker_id.ready:
+                try:
+                    self._speaker_queue.put_nowait((msg_id, segment))
+                except queue.Full:
+                    pass  # skip speaker ID if backlogged
+
+    def _speaker_worker(self):
+        """Thread: consume speaker ID queue -> identify -> update UI label."""
+        while self._running:
+            try:
+                msg_id, segment = self._speaker_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            if not self._speaker_id.ready:
+                continue
+            try:
+                speaker = self._speaker_id.identify(segment)
+                if self._overlay:
+                    self._overlay.update_speaker_signal.emit(msg_id, speaker)
+            except Exception as e:
+                log.error("Speaker ID error: %s", e)
 
     # ── Analyzer / Compressor setup ──
 
@@ -689,6 +712,9 @@ class LiveTranslateApp:
         self._asr_thread_system.start()
         self._asr_thread_mic.start()
 
+        self._speaker_thread = threading.Thread(target=self._speaker_worker, daemon=True)
+        self._speaker_thread.start()
+
         # Start analyzer + compressor
         self._setup_analyzer()
         self._analyzer.start()
@@ -701,7 +727,8 @@ class LiveTranslateApp:
         self._audio.stop()
 
         for t_ref in [self._audio_thread_system, self._audio_thread_mic,
-                      self._asr_thread_system, self._asr_thread_mic]:
+                      self._asr_thread_system, self._asr_thread_mic,
+                      self._speaker_thread]:
             if t_ref:
                 t_ref.join(timeout=3)
 
@@ -712,6 +739,7 @@ class LiveTranslateApp:
         self._audio_thread_mic = None
         self._asr_thread_system = None
         self._asr_thread_mic = None
+        self._speaker_thread = None
 
         log.info("Pipeline stopped")
 
