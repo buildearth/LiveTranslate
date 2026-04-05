@@ -189,6 +189,7 @@ class LiveTranslateApp:
         self._dialogue_buffer = DialogueBuffer()
         self._analyzer = AnalysisScheduler(self._dialogue_buffer)
         self._compressor = SummaryCompressor(self._dialogue_buffer)
+        self._analysis_windows = []  # list of (AnalysisScheduler, AnalysisWindow)
 
         # Speaker identification for system audio
         self._speaker_id = SpeakerIdentifier(device="cuda" if torch.cuda.is_available() else "cpu")
@@ -665,6 +666,8 @@ class LiveTranslateApp:
         model_name = model_cfg["model"]
         self._analyzer.set_client(client, model_name)
         self._compressor.set_client(client, model_name)
+        for analyzer, _win in self._analysis_windows:
+            analyzer.set_client(client, model_name)
 
     def _on_scene_changed(self, preset_name):
         """Handle scene preset change from overlay combo."""
@@ -673,6 +676,56 @@ class LiveTranslateApp:
             if preset:
                 self._analyzer.set_preset(preset)
                 log.info("Scene preset changed to: %s", preset_name)
+
+    def _open_analysis_window(self, preset_name):
+        """Open a new independent analysis window for the given preset."""
+        if not self._panel:
+            return
+        preset = self._panel.get_preset(preset_name)
+        if not preset:
+            log.warning("Preset not found: %s", preset_name)
+            return
+
+        from analysis_window import AnalysisWindow
+
+        # Create independent analyzer sharing the same dialogue buffer
+        analyzer = AnalysisScheduler(self._dialogue_buffer)
+        analyzer.set_preset(preset)
+
+        # Share the same API client/model as the main analyzer
+        active_model = self._panel.get_active_model()
+        if active_model:
+            client = make_openai_client(
+                active_model["api_base"], active_model["api_key"],
+                active_model.get("proxy", "none"),
+                timeout=active_model.get("timeout", 10),
+            )
+            analyzer.set_client(client, active_model["model"])
+
+        # Create window
+        win = AnalysisWindow(preset_name)
+
+        # Connect analyzer output to window via thread-safe signals
+        analyzer.on_stream_chunk = lambda text: win.update_stream_signal.emit(text)
+        analyzer.on_stream_done = lambda text, prev: win.finish_stream_signal.emit(text)
+
+        # Connect window controls
+        win.manual_trigger.connect(analyzer.trigger_manual)
+        win.closed.connect(lambda w: self._close_analysis_window(w))
+
+        self._analysis_windows.append((analyzer, win))
+        analyzer.start()
+        win.show()
+        log.info("Opened analysis window: %s (total: %d)", preset_name, len(self._analysis_windows))
+
+    def _close_analysis_window(self, win):
+        """Clean up when an analysis window is closed."""
+        for i, (analyzer, w) in enumerate(self._analysis_windows):
+            if w is win:
+                analyzer.stop()
+                self._analysis_windows.pop(i)
+                log.info("Closed analysis window (remaining: %d)", len(self._analysis_windows))
+                break
 
     # ── Start / Stop / Pause ──
 
@@ -736,6 +789,10 @@ class LiveTranslateApp:
 
         self._analyzer.stop()
         self._compressor.stop()
+        for analyzer, win in self._analysis_windows:
+            analyzer.stop()
+            win.close()
+        self._analysis_windows.clear()
 
         self._audio_thread_system = None
         self._audio_thread_mic = None
@@ -1281,6 +1338,7 @@ def main():
     overlay.analyze_requested.connect(live_trans._analyzer.trigger_manual)
     overlay.clear_analysis_history.connect(live_trans._analyzer.clear_history)
     overlay.retain_history_changed.connect(live_trans._analyzer.set_retain_history)
+    overlay.open_analysis_window_requested.connect(live_trans._open_analysis_window)
     overlay.clear_signal.connect(lambda: live_trans._dialogue_buffer.clear())
 
     tray.setContextMenu(menu)
