@@ -280,6 +280,7 @@ subwin_anim_slide_up: "Slide Up"
 subwin_anim_slide_down: "Slide Down"
 
 # Analysis
+open_in_new_window: "Open \"{name}\" in new window"
 analysis_panel: "AI Analysis"
 analysis_trigger: "Analyze"
 analysis_retain_history: "Retain History"

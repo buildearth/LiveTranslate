@@ -624,6 +624,7 @@ class DragHandle(QWidget):
     taskbar_toggled = pyqtSignal(bool)
     target_language_changed = pyqtSignal(str)
     scene_changed = pyqtSignal(str)
+    open_analysis_window = pyqtSignal(str)  # preset_name
     model_changed = pyqtSignal(int)
     start_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
@@ -793,6 +794,8 @@ class DragHandle(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self._scene_combo.currentIndexChanged.connect(self._on_scene_changed)
+        self._scene_combo.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._scene_combo.customContextMenuRequested.connect(self._on_scene_context_menu)
         row2b.addWidget(self._scene_combo, 2)
 
         row2_outer.addLayout(row2b)
@@ -824,6 +827,17 @@ class DragHandle(QWidget):
         name = self._scene_combo.itemData(index)
         if name:
             self.scene_changed.emit(name)
+
+    def _on_scene_context_menu(self, pos):
+        from PyQt6.QtWidgets import QMenu
+        name = self._scene_combo.currentData()
+        if not name:
+            return
+        menu = QMenu(self)
+        action = menu.addAction(t("open_in_new_window").format(name=name))
+        result = menu.exec(self._scene_combo.mapToGlobal(pos))
+        if result == action:
+            self.open_analysis_window.emit(name)
 
     def set_models(self, models: list, active_index: int = 0):
         self._model_combo.blockSignals(True)
@@ -898,6 +912,7 @@ class SubtitleOverlay(QWidget):
     clear_analysis_history = pyqtSignal()  # clear analyzer's accumulated history
     retain_history_changed = pyqtSignal(bool)  # toggle analysis history retention
     scene_changed = pyqtSignal(str)
+    open_analysis_window_requested = pyqtSignal(str)  # preset_name
     start_requested = pyqtSignal()
     stop_requested = pyqtSignal()
     hide_requested = pyqtSignal()
@@ -974,6 +989,7 @@ class SubtitleOverlay(QWidget):
         self._handle.taskbar_toggled.connect(self._set_taskbar)
         self._handle.target_language_changed.connect(self.target_language_changed.emit)
         self._handle.scene_changed.connect(self.scene_changed.emit)
+        self._handle.open_analysis_window.connect(self.open_analysis_window_requested.emit)
         self._handle.model_changed.connect(self.model_switch_requested.emit)
         self._handle.start_clicked.connect(self.start_requested.emit)
         self._handle.stop_clicked.connect(self.stop_requested.emit)

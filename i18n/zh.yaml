@@ -279,6 +279,7 @@ subwin_anim_slide_up: "从下滑入"
 subwin_anim_slide_down: "从上滑入"
 
 # Analysis
+open_in_new_window: "在新窗口中打开「{name}」"
 analysis_panel: "AI 分析"
 analysis_trigger: "分析"
 analysis_retain_history: "保留历史"
