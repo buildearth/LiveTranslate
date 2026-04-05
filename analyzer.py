@@ -45,6 +45,8 @@ class AnalysisScheduler:
         self._pending_count = 0  # utterances arrived since last analysis
         self._last_analysis_done_time = 0.0  # when last analysis finished displaying
         self._manual_trigger = False  # True when user clicked manual trigger
+        self._own_pending: list[Utterance] = []
+        self._pending_lock = threading.Lock()
 
         # Callbacks (set by main.py)
         self.on_stream_chunk = None    # callable(str) - partial analysis text
@@ -101,8 +103,10 @@ class AnalysisScheduler:
 
     # -- internal --
 
-    def _on_new_utterance(self, _u: Utterance):
-        self._pending_count += 1
+    def _on_new_utterance(self, u: Utterance):
+        with self._pending_lock:
+            self._own_pending.append(u)
+            self._pending_count = len(self._own_pending)
         if self._api_busy:
             return  # will fire after current request completes
         if self._pending_count >= self.BATCH_THRESHOLD:
@@ -110,6 +114,12 @@ class AnalysisScheduler:
             self._request_event.set()
         else:
             self._restart_debounce()
+
+    def _take_own_pending(self) -> list[Utterance]:
+        with self._pending_lock:
+            batch = self._own_pending[:]
+            self._own_pending.clear()
+            return batch
 
     def _restart_debounce(self):
         self._cancel_debounce()
@@ -143,14 +153,13 @@ class AnalysisScheduler:
                         break
 
             self._manual_trigger = False
-            pending = self._buffer.take_pending()
+            pending = self._take_own_pending()
             if not pending:
                 continue
-            self._pending_count = 0
             self._do_analysis(pending)
 
             # After analysis completes, check if more arrived during API call
-            if self._buffer.pending_count() > 0:
+            if len(self._own_pending) > 0:
                 self._request_event.set()
 
     def _do_analysis(self, new_utterances: list[Utterance]):
