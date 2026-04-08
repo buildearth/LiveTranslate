@@ -1304,30 +1304,80 @@ class SubtitleOverlay(QWidget):
         self._analysis_text.setMarkdown(text)
 
     def _on_update_summary(self, output):
-        """Display LiveSummary output in the analysis panel."""
-        parts = []
-        if output.overview:
-            parts.append(f"**{t('summary_overview')}**\n{output.overview}")
-        if output.current_topic and output.current_topic.title:
-            parts.append(
-                f"**{t('summary_current_topic')}: {output.current_topic.title}**\n"
-                f"{output.current_topic.summary}"
-            )
-        if output.host_tips:
-            tips_lines = []
-            for tip in output.host_tips:
-                icon = {
-                    "high": "\u26a0", "medium": "\u2139", "low": "\u2022"
-                }.get(tip.priority, "\u2022")
-                tips_lines.append(f"{icon} [{tip.category}] {tip.content}")
-            parts.append(f"**{t('summary_tips')}**\n" + "\n".join(tips_lines))
+        """Display LiveSummary output in the analysis panel with styled HTML."""
+        sections = []
+
+        # Meta bar (top, compact)
         if output.meta:
             mins = int(output.meta.duration_seconds // 60)
-            parts.append(
-                f"_{t('summary_duration')}: {mins}min | "
-                f"{t('summary_topics')}: {output.meta.total_topics}_"
+            secs = int(output.meta.duration_seconds % 60)
+            changed = ' \u2022 \u26a1 ' + t('summary_topic_changed') if output.meta.topic_changed else ''
+            sections.append(
+                f'<div style="color:#888; font-size:10px; padding:2px 0 4px 0; '
+                f'border-bottom:1px solid #333; margin-bottom:6px;">'
+                f'{t("summary_duration")} {mins}:{secs:02d} \u2022 '
+                f'{t("summary_topics")} {output.meta.total_topics}{changed}</div>'
             )
-        self._analysis_text.setMarkdown("\n\n".join(parts))
+
+        # Current topic (highlighted)
+        if output.current_topic and output.current_topic.title:
+            sections.append(
+                f'<div style="background:rgba(70,130,180,40); border-left:3px solid #4682B4; '
+                f'padding:4px 8px; margin:4px 0; border-radius:3px;">'
+                f'<div style="color:#6cf; font-size:11px; font-weight:bold;">'
+                f'\U0001f4cd {output.current_topic.title}</div>'
+                f'<div style="color:#ccc; font-size:11px; margin-top:2px;">'
+                f'{_escape(output.current_topic.summary)}</div></div>'
+            )
+
+        # Host tips (color-coded by priority)
+        if output.host_tips:
+            tip_html = []
+            for tip in output.host_tips:
+                if tip.priority == "high":
+                    color, icon = "#f5a623", "\u26a0\ufe0f"
+                elif tip.priority == "medium":
+                    color, icon = "#5b9bd5", "\u2139\ufe0f"
+                else:
+                    color, icon = "#888", "\u2022"
+                cat_color = "#aaa"
+                tip_html.append(
+                    f'<div style="padding:2px 0;">'
+                    f'<span style="color:{color};">{icon}</span> '
+                    f'<span style="color:{cat_color}; font-size:10px;">[{tip.category}]</span> '
+                    f'<span style="color:#ddd; font-size:11px;">{_escape(tip.content)}</span></div>'
+                )
+            sections.append(
+                f'<div style="background:rgba(255,255,255,8); padding:4px 8px; '
+                f'margin:4px 0; border-radius:3px;">'
+                f'<div style="color:#f0c040; font-size:10px; font-weight:bold; '
+                f'margin-bottom:2px;">\U0001f4a1 {t("summary_tips")}</div>'
+                + "".join(tip_html) + '</div>'
+            )
+
+        # Overview (scrollable history)
+        if output.overview:
+            lines = output.overview.split("\n")
+            overview_html = ""
+            for line in lines:
+                if line.strip():
+                    overview_html += (
+                        f'<div style="color:#aaa; font-size:11px; padding:1px 0; '
+                        f'border-left:2px solid #444; padding-left:6px; margin:2px 0;">'
+                        f'{_escape(line)}</div>'
+                    )
+            sections.append(
+                f'<div style="margin:4px 0;">'
+                f'<div style="color:#7a7; font-size:10px; font-weight:bold; '
+                f'margin-bottom:2px;">\U0001f4dc {t("summary_overview")}</div>'
+                + overview_html + '</div>'
+            )
+
+        self._analysis_text.setHtml(
+            '<div style="font-family:sans-serif;">' + "".join(sections) + '</div>'
+        )
+        sb = self._analysis_text.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     def _on_finish_analysis_history(self, new_text, prev_text):
         """Show new analysis with previous analysis in gray above."""
