@@ -9,7 +9,7 @@ from openai import OpenAI
 
 from analysis_presets import AnalysisPreset
 from dialogue_buffer import DialogueBuffer, Utterance
-from summary_compressor import format_utterances
+from summary_bridge import format_utterances
 
 log = logging.getLogger(__name__)
 

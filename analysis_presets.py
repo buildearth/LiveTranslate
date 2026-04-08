@@ -160,10 +160,3 @@ ANALYSIS_PRESETS: dict[str, AnalysisPreset] = {
         builtin=True,
     ),
 }
-
-SUMMARY_COMPRESS_PROMPT = (
-    "将以下对话摘要和新增对话合并，生成简洁的结构化摘要。\n"
-    "保留：关键事实、双方立场、已达成共识、待解决问题、情绪变化。\n"
-    "删除：重复信息、无实质内容的寒暄。\n"
-    "输出纯文本，不超过500字。"
-)

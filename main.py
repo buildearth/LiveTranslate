@@ -43,7 +43,7 @@ from speaker_identifier import SpeakerIdentifier
 from translator import Translator, make_openai_client
 from dialogue_buffer import DialogueBuffer
 from analyzer import AnalysisScheduler
-from summary_compressor import SummaryCompressor
+from summary_bridge import SummaryCompressor
 
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QDialog, QMessageBox
 from PyQt6.QtGui import QAction, QActionGroup, QIcon, QPixmap, QPainter, QColor, QFont
