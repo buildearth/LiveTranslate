@@ -279,6 +279,12 @@ subwin_anim_slide_up: "从下滑入"
 subwin_anim_slide_down: "从上滑入"
 
 # Analysis
+open_in_new_window: "在新窗口中打开「{name}」"
+summary_overview: "全场概述"
+summary_current_topic: "当前话题"
+summary_tips: "主播建议"
+summary_duration: "时长"
+summary_topics: "话题数"
 analysis_panel: "AI 分析"
 analysis_trigger: "分析"
 analysis_retain_history: "保留历史"

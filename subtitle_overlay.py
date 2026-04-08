@@ -624,6 +624,7 @@ class DragHandle(QWidget):
     taskbar_toggled = pyqtSignal(bool)
     target_language_changed = pyqtSignal(str)
     scene_changed = pyqtSignal(str)
+    open_analysis_window = pyqtSignal(str)  # preset_name
     model_changed = pyqtSignal(int)
     start_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
@@ -793,6 +794,8 @@ class DragHandle(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
         self._scene_combo.currentIndexChanged.connect(self._on_scene_changed)
+        self._scene_combo.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._scene_combo.customContextMenuRequested.connect(self._on_scene_context_menu)
         row2b.addWidget(self._scene_combo, 2)
 
         row2_outer.addLayout(row2b)
@@ -824,6 +827,17 @@ class DragHandle(QWidget):
         name = self._scene_combo.itemData(index)
         if name:
             self.scene_changed.emit(name)
+
+    def _on_scene_context_menu(self, pos):
+        from PyQt6.QtWidgets import QMenu
+        name = self._scene_combo.currentData()
+        if not name:
+            return
+        menu = QMenu(self)
+        action = menu.addAction(t("open_in_new_window").format(name=name))
+        result = menu.exec(self._scene_combo.mapToGlobal(pos))
+        if result == action:
+            self.open_analysis_window.emit(name)
 
     def set_models(self, models: list, active_index: int = 0):
         self._model_combo.blockSignals(True)
@@ -889,6 +903,7 @@ class SubtitleOverlay(QWidget):
     update_analysis_signal = pyqtSignal(str)
     finish_analysis_history_signal = pyqtSignal(str, str)  # new_text, prev_text
     finish_analysis_signal = pyqtSignal(str)
+    update_summary_signal = pyqtSignal(object)  # SummaryOutput
 
     settings_requested = pyqtSignal()
     target_language_changed = pyqtSignal(str)
@@ -897,6 +912,7 @@ class SubtitleOverlay(QWidget):
     analyze_requested = pyqtSignal()
     clear_analysis_history = pyqtSignal()  # clear analyzer's accumulated history
     retain_history_changed = pyqtSignal(bool)  # toggle analysis history retention
+    open_analysis_window_requested = pyqtSignal(str)  # preset_name
     scene_changed = pyqtSignal(str)
     start_requested = pyqtSignal()
     stop_requested = pyqtSignal()
@@ -932,6 +948,7 @@ class SubtitleOverlay(QWidget):
         self.update_analysis_signal.connect(self._on_update_analysis)
         self.finish_analysis_signal.connect(self._on_finish_analysis)
         self.finish_analysis_history_signal.connect(self._on_finish_analysis_history)
+        self.update_summary_signal.connect(self._on_update_summary)
 
     def _setup_ui(self):
         self.setWindowFlags(
@@ -974,6 +991,7 @@ class SubtitleOverlay(QWidget):
         self._handle.taskbar_toggled.connect(self._set_taskbar)
         self._handle.target_language_changed.connect(self.target_language_changed.emit)
         self._handle.scene_changed.connect(self.scene_changed.emit)
+        self._handle.open_analysis_window.connect(self.open_analysis_window_requested.emit)
         self._handle.model_changed.connect(self.model_switch_requested.emit)
         self._handle.start_clicked.connect(self.start_requested.emit)
         self._handle.stop_clicked.connect(self.stop_requested.emit)
@@ -1317,6 +1335,32 @@ class SubtitleOverlay(QWidget):
 
     def _on_finish_analysis(self, text):
         self._analysis_text.setMarkdown(text)
+
+    def _on_update_summary(self, output):
+        """Display LiveSummary output in the analysis panel."""
+        parts = []
+        if output.overview:
+            parts.append(f"**{t('summary_overview')}**\n{output.overview}")
+        if output.current_topic and output.current_topic.title:
+            parts.append(
+                f"**{t('summary_current_topic')}: {output.current_topic.title}**\n"
+                f"{output.current_topic.summary}"
+            )
+        if output.host_tips:
+            tips_lines = []
+            for tip in output.host_tips:
+                icon = {
+                    "high": "\u26a0", "medium": "\u2139", "low": "\u2022"
+                }.get(tip.priority, "\u2022")
+                tips_lines.append(f"{icon} [{tip.category}] {tip.content}")
+            parts.append(f"**{t('summary_tips')}**\n" + "\n".join(tips_lines))
+        if output.meta:
+            mins = int(output.meta.duration_seconds // 60)
+            parts.append(
+                f"_{t('summary_duration')}: {mins}min | "
+                f"{t('summary_topics')}: {output.meta.total_topics}_"
+            )
+        self._analysis_text.setMarkdown("\n\n".join(parts))
 
     def _on_finish_analysis_history(self, new_text, prev_text):
         """Show new analysis with previous analysis in gray above."""
