@@ -27,8 +27,9 @@ class AnalysisScheduler:
     BATCH_THRESHOLD = 5
     MIN_DISPLAY_S = 8.0  # seconds to keep analysis visible before allowing replacement
 
-    def __init__(self, buffer: DialogueBuffer):
+    def __init__(self, buffer: DialogueBuffer, summary_bridge=None):
         self._buffer = buffer
+        self._summary_bridge = summary_bridge
         self._client: OpenAI | None = None
         self._model: str = ""
         self._preset: AnalysisPreset | None = None
@@ -168,7 +169,6 @@ class AnalysisScheduler:
 
         system_prompt = preset.build_prompt()
         is_cumulative = getattr(preset, "cumulative", False)
-        summary = self._buffer.summary
 
         user_parts = []
         if is_cumulative:
@@ -181,8 +181,19 @@ class AnalysisScheduler:
             user_parts.append(f"## 新增对话\n{format_utterances(new_utterances)}")
             user_parts.append("请输出更新后的完整总结。")
         else:
-            if summary:
-                user_parts.append(f"## 对话摘要\n{summary}")
+            # Use structured context from LiveSummary if available
+            if self._summary_bridge and self._summary_bridge.latest_output:
+                output = self._summary_bridge.latest_output
+                if output.overview:
+                    user_parts.append(f"## 全场概述\n{output.overview}")
+                if output.current_topic and output.current_topic.summary:
+                    user_parts.append(
+                        f"## 当前话题: {output.current_topic.title}\n{output.current_topic.summary}"
+                    )
+            else:
+                summary = self._buffer.summary
+                if summary:
+                    user_parts.append(f"## 对话摘要\n{summary}")
             user_parts.append(f"## 最新对话\n{format_utterances(new_utterances)}")
             user_parts.append("请基于以上对话给出分析和建议。")
         user_content = "\n\n".join(user_parts)
