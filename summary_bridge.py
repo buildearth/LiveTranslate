@@ -1,52 +1,59 @@
 # summary_bridge.py
-"""Summary management and formatting utilities for dialogue context."""
+"""Background bridge between DialogueBuffer and LiveSummarizer."""
 
 import logging
 import threading
-
-from openai import OpenAI
+import time
 
 from dialogue_buffer import DialogueBuffer, Utterance
 
 log = logging.getLogger(__name__)
 
 
-def format_utterances(utterances: list[Utterance]) -> str:
-    """Format utterances into timestamped text block."""
-    from datetime import datetime
-    lines = []
-    for u in utterances:
-        ts = datetime.fromtimestamp(u.timestamp).strftime("%H:%M:%S")
-        lines.append(f"[{u.speaker} {ts}] {u.text}")
-    return "\n".join(lines)
+class SummaryBridge:
+    """Wraps LiveSummarizer in a background thread.
 
-
-class SummaryCompressor:
-    """Monitors DialogueBuffer and compresses history into rolling summaries.
-
-    Runs compression in a background thread. Does not block the analyzer.
+    Consumes utterances from DialogueBuffer, batches them, and calls
+    LiveSummarizer.summarize() periodically. Stores latest SummaryOutput
+    for AnalysisScheduler and UI to read.
     """
 
-    def __init__(self, buffer: DialogueBuffer, threshold: int = 15):
+    BATCH_THRESHOLD = 5
+    TIME_INTERVAL = 30.0
+
+    def __init__(self, buffer: DialogueBuffer):
         self._buffer = buffer
-        self._threshold = threshold
-        self._client: OpenAI | None = None
-        self._model: str = ""
-        self._running = False
-        self._thread: threading.Thread | None = None
-        self._event = threading.Event()  # signaled when new utterances arrive
+        self._summarizer = None
+        self._session_id = ""
+        self._latest_output = None
         self._lock = threading.Lock()
 
-    def set_client(self, client: OpenAI, model: str):
+        self._running = False
+        self._thread = None
+        self._event = threading.Event()
+        self._pending: list[Utterance] = []
+        self._pending_lock = threading.Lock()
+        self._last_call_time = 0.0
+
+        # Callbacks (set by main.py)
+        self.on_summary_updated = None  # callable(SummaryOutput)
+
+    @property
+    def latest_output(self):
+        return self._latest_output
+
+    def set_summarizer(self, summarizer, session_id: str):
+        """Set or replace the LiveSummarizer instance."""
         with self._lock:
-            self._client = client
-            self._model = model
+            self._summarizer = summarizer
+            self._session_id = session_id
+            self._latest_output = None
 
     def start(self):
         if self._running:
             return
         self._running = True
-        self._buffer.on_utterance(lambda _u: self._event.set())
+        self._buffer.on_utterance(self._on_new_utterance)
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -54,56 +61,56 @@ class SummaryCompressor:
         self._running = False
         self._event.set()
         if self._thread:
-            self._thread.join(timeout=3)
+            self._thread.join(timeout=5)
             self._thread = None
+
+    def _on_new_utterance(self, u: Utterance):
+        with self._pending_lock:
+            self._pending.append(u)
+            count = len(self._pending)
+        if count >= self.BATCH_THRESHOLD:
+            self._event.set()
+
+    def _take_pending(self) -> list[Utterance]:
+        with self._pending_lock:
+            batch = self._pending[:]
+            self._pending.clear()
+            return batch
 
     def _loop(self):
         while self._running:
-            self._event.wait(timeout=5.0)
+            self._event.wait(timeout=self.TIME_INTERVAL)
             self._event.clear()
             if not self._running:
                 break
-            if self._buffer.unsummarized_count() >= self._threshold:
-                self._compress()
 
-    def _compress(self):
-        with self._lock:
-            client = self._client
-            model = self._model
-        if not client or not model:
-            return
+            pending = self._take_pending()
+            if not pending:
+                continue
 
-        old_summary = self._buffer.summary
-        new_utterances = self._buffer.unsummarized_utterances()
-        if not new_utterances:
-            return
+            with self._lock:
+                summarizer = self._summarizer
+                session_id = self._session_id
+            if not summarizer or not session_id:
+                continue
 
-        user_content = ""
-        if old_summary:
-            user_content += f"## 已有摘要\n{old_summary}\n\n"
-        user_content += f"## 新增对话\n{format_utterances(new_utterances)}"
+            self._do_summarize(summarizer, session_id, pending)
 
-        prompt = (
-            "将以下对话摘要和新增对话合并，生成简洁的结构化摘要。\n"
-            "保留：关键事实、双方立场、已达成共识、待解决问题、情绪变化。\n"
-            "删除：重复信息、无实质内容的寒暄。\n"
-            "输出纯文本，不超过500字。"
-        )
-
+    def _do_summarize(self, summarizer, session_id, utterances):
         try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": user_content},
-                ],
-                max_tokens=600,
-                temperature=0.3,
-                timeout=30,
+            from live_summary import Message
+            messages = [
+                Message(role=u.speaker, content=u.text, timestamp=u.timestamp)
+                for u in utterances
+            ]
+            output = summarizer.summarize(session_id, messages)
+            self._latest_output = output
+            self._last_call_time = time.time()
+            log.info(
+                "LiveSummary updated: topics=%d, overview=%d chars, tips=%d",
+                output.meta.total_topics, len(output.overview), len(output.host_tips),
             )
-            new_summary = resp.choices[0].message.content.strip()
-            self._buffer.update_summary(new_summary)
-            log.info("Summary compressed: %d utterances → %d chars",
-                     len(new_utterances), len(new_summary))
+            if self.on_summary_updated:
+                self.on_summary_updated(output)
         except Exception as e:
-            log.error("Summary compression failed: %s", e)
+            log.error("LiveSummary error: %s", e)
