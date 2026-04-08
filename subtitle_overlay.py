@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSizeGrip,
     QSizePolicy,
+    QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -1019,29 +1020,74 @@ class SubtitleOverlay(QWidget):
         self._scroll.setWidget(self._msg_container)
         container_layout.addWidget(self._scroll)
 
-        # -- Analysis panel (lower half) --
-        analysis_bar = QHBoxLayout()
-        analysis_title = QLabel(t("analysis_panel"))
-        analysis_title.setStyleSheet("color:white; font-weight:bold; font-size:12px;")
-        analysis_bar.addWidget(analysis_title)
-        analysis_bar.addStretch()
-
-        self._clear_history_btn = QPushButton(t("analysis_clear_history"))
-        self._clear_history_btn.setFixedHeight(22)
-        self._clear_history_btn.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 6px; }")
-        self._clear_history_btn.clicked.connect(lambda: self._analysis_text.clear())
-        analysis_bar.addWidget(self._clear_history_btn)
-
-        container_layout.addLayout(analysis_bar)
-
-        self._analysis_text = QTextEdit()
-        self._analysis_text.setReadOnly(True)
-        self._analysis_text.setMinimumHeight(120)
-        self._analysis_text.setStyleSheet(
-            "QTextEdit { background: rgba(0,0,0,180); color: white; "
-            "border: 1px solid #333; font-size: 12px; padding: 4px; }"
+        # -- Analysis panel (lower half, two-pane splitter) --
+        _panel_css = (
+            "QTextEdit { background: rgba(0,0,0,160); color: #ddd; "
+            "border: 1px solid #333; font-size: 11px; padding: 6px; "
+            "selection-background-color: rgba(100,150,255,80); }"
         )
-        container_layout.addWidget(self._analysis_text)
+        _splitter_css = (
+            "QSplitter::handle { background: #333; height: 3px; }"
+        )
+
+        # Tips panel (top)
+        tips_container = QWidget()
+        tips_container.setStyleSheet("background: transparent;")
+        tips_layout = QVBoxLayout(tips_container)
+        tips_layout.setContentsMargins(0, 0, 0, 0)
+        tips_layout.setSpacing(0)
+
+        tips_header = QHBoxLayout()
+        tips_title = QLabel(f"\U0001f4a1 {t('summary_tips')}")
+        tips_title.setStyleSheet("color:#f0c040; font-weight:bold; font-size:11px; padding:2px;")
+        tips_header.addWidget(tips_title)
+        tips_header.addStretch()
+        self._meta_label = QLabel("")
+        self._meta_label.setStyleSheet("color:#666; font-size:9px; padding:2px;")
+        tips_header.addWidget(self._meta_label)
+        tips_layout.addLayout(tips_header)
+
+        self._tips_text = QTextEdit()
+        self._tips_text.setReadOnly(True)
+        self._tips_text.setStyleSheet(_panel_css)
+        tips_layout.addWidget(self._tips_text)
+
+        # Overview panel (bottom)
+        overview_container = QWidget()
+        overview_container.setStyleSheet("background: transparent;")
+        overview_layout = QVBoxLayout(overview_container)
+        overview_layout.setContentsMargins(0, 0, 0, 0)
+        overview_layout.setSpacing(0)
+
+        overview_header = QHBoxLayout()
+        overview_title = QLabel(f"\U0001f4dc {t('summary_overview')}")
+        overview_title.setStyleSheet("color:#7a7; font-weight:bold; font-size:11px; padding:2px;")
+        overview_header.addWidget(overview_title)
+        overview_header.addStretch()
+        clear_btn = QPushButton(t("analysis_clear_history"))
+        clear_btn.setFixedHeight(18)
+        clear_btn.setStyleSheet(
+            "QPushButton { font-size: 9px; padding: 1px 5px; color: #888; "
+            "background: rgba(255,255,255,10); border: 1px solid #444; border-radius: 2px; }"
+            "QPushButton:hover { color: #ccc; background: rgba(255,255,255,20); }"
+        )
+        clear_btn.clicked.connect(lambda: (self._tips_text.clear(), self._overview_text.clear()))
+        overview_header.addWidget(clear_btn)
+        overview_layout.addLayout(overview_header)
+
+        self._overview_text = QTextEdit()
+        self._overview_text.setReadOnly(True)
+        self._overview_text.setStyleSheet(_panel_css)
+        overview_layout.addWidget(self._overview_text)
+
+        # Splitter
+        self._analysis_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._analysis_splitter.setStyleSheet(_splitter_css)
+        self._analysis_splitter.addWidget(tips_container)
+        self._analysis_splitter.addWidget(overview_container)
+        self._analysis_splitter.setSizes([150, 120])
+        self._analysis_splitter.setChildrenCollapsible(False)
+        container_layout.addWidget(self._analysis_splitter)
 
         grip_row = QHBoxLayout()
         grip_row.addStretch()
@@ -1304,80 +1350,66 @@ class SubtitleOverlay(QWidget):
         self._analysis_text.setMarkdown(text)
 
     def _on_update_summary(self, output):
-        """Display LiveSummary output in the analysis panel with styled HTML."""
-        sections = []
-
-        # Meta bar (top, compact)
+        """Display LiveSummary output in two-pane analysis panel."""
+        # -- Meta label --
         if output.meta:
             mins = int(output.meta.duration_seconds // 60)
             secs = int(output.meta.duration_seconds % 60)
-            changed = ' \u2022 \u26a1 ' + t('summary_topic_changed') if output.meta.topic_changed else ''
-            sections.append(
-                f'<div style="color:#888; font-size:10px; padding:2px 0 4px 0; '
-                f'border-bottom:1px solid #333; margin-bottom:6px;">'
-                f'{t("summary_duration")} {mins}:{secs:02d} \u2022 '
-                f'{t("summary_topics")} {output.meta.total_topics}{changed}</div>'
+            changed = '  \u26a1 ' + t('summary_topic_changed') if output.meta.topic_changed else ''
+            self._meta_label.setText(
+                f"{t('summary_duration')} {mins}:{secs:02d}  |  "
+                f"{t('summary_topics')} {output.meta.total_topics}{changed}"
             )
 
-        # Current topic (highlighted)
+        # -- Tips panel (current topic + host tips) --
+        tips_parts = []
+
         if output.current_topic and output.current_topic.title:
-            sections.append(
-                f'<div style="background:rgba(70,130,180,40); border-left:3px solid #4682B4; '
-                f'padding:4px 8px; margin:4px 0; border-radius:3px;">'
-                f'<div style="color:#6cf; font-size:11px; font-weight:bold;">'
-                f'\U0001f4cd {output.current_topic.title}</div>'
-                f'<div style="color:#ccc; font-size:11px; margin-top:2px;">'
-                f'{_escape(output.current_topic.summary)}</div></div>'
+            tips_parts.append(
+                f'<div style="border-left:3px solid #4682B4; '
+                f'padding:3px 8px; margin:0 0 6px 0;">'
+                f'<span style="color:#6cf; font-size:11px; font-weight:bold;">'
+                f'\U0001f4cd {_escape(output.current_topic.title)}</span><br/>'
+                f'<span style="color:#bbb; font-size:11px;">'
+                f'{_escape(output.current_topic.summary)}</span></div>'
             )
 
-        # Host tips (color-coded by priority)
         if output.host_tips:
-            tip_html = []
             for tip in output.host_tips:
                 if tip.priority == "high":
-                    color, icon = "#f5a623", "\u26a0\ufe0f"
+                    bg, border, icon = "rgba(245,166,35,15)", "#f5a623", "\u26a0"
                 elif tip.priority == "medium":
-                    color, icon = "#5b9bd5", "\u2139\ufe0f"
+                    bg, border, icon = "rgba(91,155,213,10)", "#5b9bd5", "\u25b6"
                 else:
-                    color, icon = "#888", "\u2022"
-                cat_color = "#aaa"
-                tip_html.append(
-                    f'<div style="padding:2px 0;">'
-                    f'<span style="color:{color};">{icon}</span> '
-                    f'<span style="color:{cat_color}; font-size:10px;">[{tip.category}]</span> '
+                    bg, border, icon = "rgba(255,255,255,5)", "#555", "\u2022"
+                tips_parts.append(
+                    f'<div style="background:{bg}; border-left:3px solid {border}; '
+                    f'padding:3px 8px; margin:2px 0;">'
+                    f'<span style="color:{border}; font-size:10px;">{icon}</span> '
+                    f'<span style="color:#999; font-size:9px;">{tip.category}</span> '
                     f'<span style="color:#ddd; font-size:11px;">{_escape(tip.content)}</span></div>'
                 )
-            sections.append(
-                f'<div style="background:rgba(255,255,255,8); padding:4px 8px; '
-                f'margin:4px 0; border-radius:3px;">'
-                f'<div style="color:#f0c040; font-size:10px; font-weight:bold; '
-                f'margin-bottom:2px;">\U0001f4a1 {t("summary_tips")}</div>'
-                + "".join(tip_html) + '</div>'
-            )
 
-        # Overview (scrollable history)
+        self._tips_text.setHtml(
+            '<div style="font-family:sans-serif;">' + "".join(tips_parts) + '</div>'
+        )
+
+        # -- Overview panel --
         if output.overview:
             lines = output.overview.split("\n")
-            overview_html = ""
+            overview_parts = []
             for line in lines:
                 if line.strip():
-                    overview_html += (
-                        f'<div style="color:#aaa; font-size:11px; padding:1px 0; '
-                        f'border-left:2px solid #444; padding-left:6px; margin:2px 0;">'
+                    overview_parts.append(
+                        f'<div style="color:#bbb; font-size:11px; '
+                        f'border-left:2px solid #444; padding:1px 0 1px 8px; margin:3px 0;">'
                         f'{_escape(line)}</div>'
                     )
-            sections.append(
-                f'<div style="margin:4px 0;">'
-                f'<div style="color:#7a7; font-size:10px; font-weight:bold; '
-                f'margin-bottom:2px;">\U0001f4dc {t("summary_overview")}</div>'
-                + overview_html + '</div>'
+            self._overview_text.setHtml(
+                '<div style="font-family:sans-serif;">' + "".join(overview_parts) + '</div>'
             )
-
-        self._analysis_text.setHtml(
-            '<div style="font-family:sans-serif;">' + "".join(sections) + '</div>'
-        )
-        sb = self._analysis_text.verticalScrollBar()
-        sb.setValue(sb.maximum())
+            sb = self._overview_text.verticalScrollBar()
+            sb.setValue(sb.maximum())
 
     def _on_finish_analysis_history(self, new_text, prev_text):
         """Show new analysis with previous analysis in gray above."""
