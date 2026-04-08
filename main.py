@@ -40,9 +40,8 @@ from audio_capture import AudioCapture
 from vad_processor import VADProcessor
 from asr_engine import ASREngine
 from speaker_identifier import SpeakerIdentifier
-from translator import Translator, make_openai_client
+from translator import Translator
 from dialogue_buffer import DialogueBuffer
-from analyzer import AnalysisScheduler
 from summary_bridge import SummaryBridge
 
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QDialog, QMessageBox
@@ -188,8 +187,6 @@ class LiveTranslateApp:
         # Dual-channel async architecture
         self._dialogue_buffer = DialogueBuffer()
         self._summary_bridge = SummaryBridge(self._dialogue_buffer)
-        self._analyzer = AnalysisScheduler(self._dialogue_buffer, summary_bridge=self._summary_bridge)
-        self._analysis_windows = []  # list of (AnalysisScheduler, AnalysisWindow)
 
         # Speaker identification for system audio
         self._speaker_id = SpeakerIdentifier(device="cuda" if torch.cuda.is_available() else "cpu")
@@ -330,7 +327,7 @@ class LiveTranslateApp:
         self._input_price = model_config.get("input_price", 0)
         self._output_price = model_config.get("output_price", 0)
         # Update analyzer + compressor clients
-        self._update_analyzer_client(model_config)
+        self._on_model_config_changed(model_config)
 
     def _switch_asr_engine(self, engine_type: str):
         if engine_type == self._asr_type:
@@ -643,31 +640,9 @@ class LiveTranslateApp:
 
     # ── Analyzer / Compressor setup ──
 
-    def _setup_analyzer(self):
-        """Connect analyzer streaming output to overlay panel."""
-        def on_stream_chunk(text):
-            if self._overlay:
-                self._overlay.update_analysis(text)
-
-        def on_stream_done(text, prev_text=""):
-            if self._overlay:
-                self._overlay.finish_analysis(text, prev_text)
-
-        self._analyzer.on_stream_chunk = on_stream_chunk
-        self._analyzer.on_stream_done = on_stream_done
-
-    def _update_analyzer_client(self, model_cfg):
-        """Called when active model changes. Updates analyzer + summary bridge clients."""
-        client = make_openai_client(
-            model_cfg["api_base"], model_cfg["api_key"],
-            model_cfg.get("proxy", "none"),
-            timeout=model_cfg.get("timeout", 10),
-        )
-        model_name = model_cfg["model"]
-        self._analyzer.set_client(client, model_name)
+    def _on_model_config_changed(self, model_cfg):
+        """Called when active model changes. Re-init LiveSummarizer."""
         self._init_summarizer(model_cfg)
-        for analyzer, _win in self._analysis_windows:
-            analyzer.set_client(client, model_name)
 
     def _init_summarizer(self, model_cfg):
         """Create LiveSummarizer from model config and set on bridge."""
@@ -697,7 +672,7 @@ class LiveTranslateApp:
             self._summary_bridge.set_summarizer(summarizer, session_id)
             log.info("LiveSummarizer initialized: model=%s, session=%s", model_cfg["model"], session_id)
         except ImportError as e:
-            log.warning("LiveSummary not installed, summary disabled: %s", e)
+            log.warning("LiveSummary dependencies not installed, summary disabled: %s", e)
         except Exception as e:
             log.error("Failed to init LiveSummarizer: %s", e)
 
@@ -707,57 +682,6 @@ class LiveTranslateApp:
             if self._overlay:
                 self._overlay.update_summary_signal.emit(output)
         self._summary_bridge.on_summary_updated = on_summary
-
-    def _on_scene_changed(self, preset_name):
-        """Handle scene preset change from overlay combo."""
-        if self._panel:
-            preset = self._panel.get_preset(preset_name)
-            if preset:
-                self._analyzer.set_preset(preset)
-                log.info("Scene preset changed to: %s", preset_name)
-
-    def _open_analysis_window(self, preset_name):
-        """Open a new independent analysis window for the given preset."""
-        if not self._panel:
-            return
-        preset = self._panel.get_preset(preset_name)
-        if not preset:
-            log.warning("Preset not found: %s", preset_name)
-            return
-
-        from analysis_window import AnalysisWindow
-
-        analyzer = AnalysisScheduler(self._dialogue_buffer, summary_bridge=self._summary_bridge)
-        analyzer.set_preset(preset)
-
-        active_model = self._panel.get_active_model()
-        if active_model:
-            client = make_openai_client(
-                active_model["api_base"], active_model["api_key"],
-                active_model.get("proxy", "none"),
-                timeout=active_model.get("timeout", 10),
-            )
-            analyzer.set_client(client, active_model["model"])
-
-        win = AnalysisWindow(preset_name)
-        analyzer.on_stream_chunk = lambda text: win.update_stream_signal.emit(text)
-        analyzer.on_stream_done = lambda text, prev: win.finish_stream_signal.emit(text)
-        win.manual_trigger.connect(analyzer.trigger_manual)
-        win.closed.connect(lambda w: self._close_analysis_window(w))
-
-        self._analysis_windows.append((analyzer, win))
-        analyzer.start()
-        win.show()
-        log.info("Opened analysis window: %s (total: %d)", preset_name, len(self._analysis_windows))
-
-    def _close_analysis_window(self, win):
-        """Clean up when an analysis window is closed."""
-        for i, (analyzer, w) in enumerate(self._analysis_windows):
-            if w is win:
-                analyzer.stop()
-                self._analysis_windows.pop(i)
-                log.info("Closed analysis window (remaining: %d)", len(self._analysis_windows))
-                break
 
     # ── Start / Stop / Pause ──
 
@@ -802,9 +726,7 @@ class LiveTranslateApp:
         self._speaker_thread = threading.Thread(target=self._speaker_worker, daemon=True)
         self._speaker_thread.start()
 
-        # Start analyzer + summary bridge
-        self._setup_analyzer()
-        self._analyzer.start()
+        # Start LiveSummary bridge
         if self._panel:
             active_model = self._panel.get_active_model()
             if active_model:
@@ -824,12 +746,7 @@ class LiveTranslateApp:
             if t_ref:
                 t_ref.join(timeout=3)
 
-        self._analyzer.stop()
         self._summary_bridge.stop()
-        for analyzer, win in self._analysis_windows:
-            analyzer.stop()
-            win.close()
-        self._analysis_windows.clear()
 
         self._audio_thread_system = None
         self._audio_thread_mic = None
@@ -972,15 +889,6 @@ def main():
         active_model = panel.get_active_model()
         if active_model:
             live_trans._on_model_changed(active_model)
-
-        # Load scene presets into overlay
-        preset_names = panel.get_all_preset_names()
-        default_preset = (saved or {}).get("default_preset", "\u5e26\u8d27\u76f4\u64ad")
-        overlay.set_scenes(preset_names, default_preset)
-        # Set initial preset on analyzer
-        initial_preset = panel.get_preset(default_preset)
-        if initial_preset:
-            live_trans._analyzer.set_preset(initial_preset)
 
     QTimer.singleShot(100, _deferred_init)
 
@@ -1371,11 +1279,6 @@ def main():
     overlay.stop_requested.connect(on_pause)
     overlay.hide_requested.connect(on_toggle_overlay)
     overlay.quit_requested.connect(on_quit)
-    overlay.scene_changed.connect(live_trans._on_scene_changed)
-    overlay.analyze_requested.connect(live_trans._analyzer.trigger_manual)
-    overlay.clear_analysis_history.connect(live_trans._analyzer.clear_history)
-    overlay.retain_history_changed.connect(live_trans._analyzer.set_retain_history)
-    overlay.open_analysis_window_requested.connect(live_trans._open_analysis_window)
     overlay.clear_signal.connect(lambda: live_trans._dialogue_buffer.clear())
 
     tray.setContextMenu(menu)

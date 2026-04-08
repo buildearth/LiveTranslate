@@ -780,23 +780,7 @@ class DragHandle(QWidget):
         self._model_combo.currentIndexChanged.connect(self.model_changed.emit)
         row2b.addWidget(self._model_combo, 3)
 
-        # Scene preset combo (replaces target/source language combos)
-        scene_lbl = QLabel(t("scene_label"))
-        scene_lbl.setFont(_lbl_font)
-        scene_lbl.setStyleSheet(_lbl_css)
-        row2b.addWidget(scene_lbl)
-
-        self._scene_combo = QComboBox()
-        self._scene_combo.setFixedHeight(18)
-        self._scene_combo.setFont(_combo_font)
-        self._scene_combo.setStyleSheet(_COMBO_CSS)
-        self._scene_combo.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
-        )
-        self._scene_combo.currentIndexChanged.connect(self._on_scene_changed)
-        self._scene_combo.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._scene_combo.customContextMenuRequested.connect(self._on_scene_context_menu)
-        row2b.addWidget(self._scene_combo, 2)
+        row2b.addStretch()
 
         row2_outer.addLayout(row2b)
 
@@ -1042,27 +1026,10 @@ class SubtitleOverlay(QWidget):
         analysis_bar.addWidget(analysis_title)
         analysis_bar.addStretch()
 
-        self._analyze_btn = QPushButton(t("analysis_trigger"))
-        self._analyze_btn.setFixedHeight(22)
-        self._analyze_btn.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 8px; }")
-        self._analyze_btn.clicked.connect(self._on_analyze_clicked)
-        analysis_bar.addWidget(self._analyze_btn)
-
-        self._retain_history_btn = QPushButton(t("analysis_retain_history"))
-        self._retain_history_btn.setFixedHeight(22)
-        self._retain_history_btn.setCheckable(True)
-        self._retain_history_btn.setChecked(True)
-        self._retain_history_btn.setStyleSheet(
-            "QPushButton { font-size: 10px; padding: 2px 6px; }"
-            "QPushButton:checked { background: rgba(80,180,80,80); color: #8f8; }"
-        )
-        self._retain_history_btn.toggled.connect(self._on_retain_history_toggled)
-        analysis_bar.addWidget(self._retain_history_btn)
-
         self._clear_history_btn = QPushButton(t("analysis_clear_history"))
         self._clear_history_btn.setFixedHeight(22)
         self._clear_history_btn.setStyleSheet("QPushButton { font-size: 10px; padding: 2px 6px; }")
-        self._clear_history_btn.clicked.connect(self._on_clear_history_clicked)
+        self._clear_history_btn.clicked.connect(lambda: self._analysis_text.clear())
         analysis_bar.addWidget(self._clear_history_btn)
 
         container_layout.addLayout(analysis_bar)
