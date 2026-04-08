@@ -145,8 +145,6 @@ class ControlPanel(QWidget):
         tabs.addTab(self._create_changelog_tab(), t("tab_changelog"))
         tabs.currentChanged.connect(self._on_tab_changed)
 
-        self._load_presets()
-
         layout.addWidget(tabs)
 
         self._bench_result.connect(self._on_bench_result)
@@ -506,87 +504,91 @@ class ControlPanel(QWidget):
     # ── Preset Tab ──
 
     def _create_preset_tab(self):
-        """Tab for scene preset structured editor."""
+        """Tab for LiveSummary guidance configuration."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        # Preset list
-        list_row = QHBoxLayout()
-        self._preset_list = QListWidget()
-        self._preset_list.currentRowChanged.connect(self._on_preset_selected)
-        list_row.addWidget(self._preset_list)
+        # -- Tip Advisors (guidance categories) --
+        advisor_group = QGroupBox(t("advisor_group"))
+        ag_layout = QVBoxLayout(advisor_group)
 
-        btn_col = QVBoxLayout()
-        self._preset_add_btn = QPushButton(t("preset_add"))
-        self._preset_add_btn.clicked.connect(self._on_preset_add)
-        btn_col.addWidget(self._preset_add_btn)
+        # Built-in advisors as checkboxes
+        from live_summary.prompts import TIP_ADVISORS
+        self._all_advisors = {
+            "topic": t("advisor_topic"),
+            "content": t("advisor_content"),
+            "pacing": t("advisor_pacing"),
+            "emotion": t("advisor_emotion"),
+            "selling": t("advisor_selling"),
+            "risk": t("advisor_risk"),
+        }
+        # Descriptions for each advisor
+        self._advisor_descriptions = {
+            "topic": "基于已聊话题和直播主题，建议下一步聊什么、当前话题是否该收",
+            "content": "检查当前话题遗漏的观众关心点",
+            "pacing": "基于时长和互动频率，给出节奏提醒",
+            "emotion": "感知观众情绪变化，建议调整语气或话题方向",
+            "selling": "识别带货转化时机，提醒上链接或强调卖点",
+            "risk": "检测敏感内容或违规风险，及时提醒",
+        }
 
-        self._preset_dup_btn = QPushButton(t("preset_duplicate"))
-        self._preset_dup_btn.clicked.connect(self._on_preset_duplicate)
-        btn_col.addWidget(self._preset_dup_btn)
+        saved_advisors = self._current_settings.get("tip_advisors", list(TIP_ADVISORS.keys()))
+        self._advisor_checks = {}
+        advisor_flow = QWidget()
+        af_layout = QHBoxLayout(advisor_flow)
+        af_layout.setContentsMargins(0, 0, 0, 0)
+        for key, label in self._all_advisors.items():
+            cb = QCheckBox(label)
+            cb.setToolTip(self._advisor_descriptions.get(key, ""))
+            cb.setChecked(key in saved_advisors)
+            cb.toggled.connect(self._on_advisor_changed)
+            self._advisor_checks[key] = cb
+            af_layout.addWidget(cb)
+        ag_layout.addWidget(advisor_flow)
 
-        self._preset_del_btn = QPushButton(t("preset_delete"))
-        self._preset_del_btn.clicked.connect(self._on_preset_delete)
-        btn_col.addWidget(self._preset_del_btn)
+        # Custom advisor
+        custom_row = QHBoxLayout()
+        custom_row.addWidget(QLabel(t("advisor_custom") + ":"))
+        self._custom_advisor_name = QLineEdit()
+        self._custom_advisor_name.setPlaceholderText(t("advisor_custom_name_hint"))
+        self._custom_advisor_name.setMaximumWidth(100)
+        custom_row.addWidget(self._custom_advisor_name)
+        self._custom_advisor_desc = QLineEdit()
+        self._custom_advisor_desc.setPlaceholderText(t("advisor_custom_desc_hint"))
+        custom_row.addWidget(self._custom_advisor_desc)
+        add_advisor_btn = QPushButton("+")
+        add_advisor_btn.setFixedWidth(30)
+        add_advisor_btn.clicked.connect(self._on_add_custom_advisor)
+        custom_row.addWidget(add_advisor_btn)
+        ag_layout.addLayout(custom_row)
 
-        btn_col.addStretch()
-        list_row.addLayout(btn_col)
-        layout.addLayout(list_row)
+        # Custom advisors list
+        self._custom_advisor_list = QListWidget()
+        self._custom_advisor_list.setMaximumHeight(60)
+        saved_custom = self._current_settings.get("custom_advisors", {})
+        for k, v in saved_custom.items():
+            self._custom_advisor_list.addItem(f"{k}: {v}")
+        ag_layout.addWidget(self._custom_advisor_list)
 
-        # Editor area
-        editor_group = QGroupBox(t("preset_edit"))
-        eg_layout = QFormLayout(editor_group)
+        # Delete custom advisor
+        del_custom_btn = QPushButton(t("advisor_delete_custom"))
+        del_custom_btn.clicked.connect(self._on_delete_custom_advisor)
+        ag_layout.addWidget(del_custom_btn)
 
-        self._pe_name = QLineEdit()
-        eg_layout.addRow(t("preset_name") + ":", self._pe_name)
+        layout.addWidget(advisor_group)
 
-        self._pe_role = QLineEdit()
-        eg_layout.addRow(t("preset_role") + ":", self._pe_role)
+        # -- Extra instructions --
+        extra_group = QGroupBox(t("advisor_extra_instructions"))
+        eg_layout = QVBoxLayout(extra_group)
+        self._advisor_extra = QTextEdit()
+        self._advisor_extra.setMaximumHeight(80)
+        self._advisor_extra.setPlaceholderText(t("advisor_extra_hint"))
+        self._advisor_extra.setPlainText(self._current_settings.get("summary_extra_instructions", ""))
+        self._advisor_extra.textChanged.connect(self._on_advisor_changed)
+        eg_layout.addWidget(self._advisor_extra)
+        layout.addWidget(extra_group)
 
-        # Focus tags as checkboxes in a flow layout
-        from analysis_presets import FOCUS_TAGS, OUTPUT_TAGS
-        self._pe_focus_checks = {}
-        focus_widget = QWidget()
-        focus_flow = QHBoxLayout(focus_widget)
-        focus_flow.setContentsMargins(0, 0, 0, 0)
-        for tag in FOCUS_TAGS:
-            cb = QCheckBox(tag)
-            self._pe_focus_checks[tag] = cb
-            focus_flow.addWidget(cb)
-        eg_layout.addRow(t("preset_focus") + ":", focus_widget)
-
-        self._pe_output_checks = {}
-        output_widget = QWidget()
-        output_flow = QHBoxLayout(output_widget)
-        output_flow.setContentsMargins(0, 0, 0, 0)
-        for tag in OUTPUT_TAGS:
-            cb = QCheckBox(tag)
-            self._pe_output_checks[tag] = cb
-            output_flow.addWidget(cb)
-        eg_layout.addRow(t("preset_output") + ":", output_widget)
-
-        self._pe_extra = QTextEdit()
-        self._pe_extra.setMaximumHeight(60)
-        eg_layout.addRow(t("preset_extra") + ":", self._pe_extra)
-
-        self._pe_cumulative_check = QCheckBox(t("preset_cumulative"))
-        eg_layout.addRow(self._pe_cumulative_check)
-
-        self._pe_advanced_check = QCheckBox(t("preset_advanced"))
-        self._pe_advanced_check.toggled.connect(self._on_preset_advanced_toggle)
-        eg_layout.addRow(self._pe_advanced_check)
-
-        self._pe_advanced_edit = QTextEdit()
-        self._pe_advanced_edit.setMaximumHeight(120)
-        self._pe_advanced_edit.setVisible(False)
-        eg_layout.addRow(self._pe_advanced_edit)
-
-        layout.addWidget(editor_group)
-
-        save_btn = QPushButton(t("preset_edit"))
-        save_btn.clicked.connect(self._on_preset_save)
-        layout.addWidget(save_btn)
-
+        layout.addStretch()
         return tab
 
     # ── Style Tab ──
@@ -1114,109 +1116,55 @@ class ControlPanel(QWidget):
             # Switch to Whisper engine with the downloaded size
             self._auto_save()
 
-    # ── Preset Management ──
+    # ── LiveSummary Advisor Management ──
 
-    def _load_presets(self):
-        from analysis_presets import ANALYSIS_PRESETS, AnalysisPreset
-        self._presets = {}
-        for name, preset in ANALYSIS_PRESETS.items():
-            self._presets[name] = preset
-        saved = self._current_settings.get("analysis_presets", [])
-        for d in saved:
-            p = AnalysisPreset.from_dict(d)
-            self._presets[p.name] = p
-        self._refresh_preset_list()
-
-    def _refresh_preset_list(self):
-        self._preset_list.clear()
-        for name, preset in self._presets.items():
-            suffix = " " + t("preset_builtin") if preset.builtin else ""
-            self._preset_list.addItem(name + suffix)
-
-    def _on_preset_selected(self, row):
-        if row < 0:
-            return
-        name = list(self._presets.keys())[row]
-        preset = self._presets[name]
-        self._pe_name.setText(preset.name)
-        self._pe_name.setReadOnly(preset.builtin)
-        self._pe_role.setText(preset.role)
-        for tag, cb in self._pe_focus_checks.items():
-            cb.setChecked(tag in preset.focus_tags)
-        for tag, cb in self._pe_output_checks.items():
-            cb.setChecked(tag in preset.output_tags)
-        self._pe_extra.setPlainText(preset.extra_instructions)
-        self._pe_cumulative_check.setChecked(getattr(preset, "cumulative", False))
-        self._pe_advanced_check.setChecked(preset.is_advanced)
-        self._pe_advanced_edit.setPlainText(preset.advanced_prompt)
-        self._pe_advanced_edit.setVisible(preset.is_advanced)
-
-    def _on_preset_advanced_toggle(self, checked):
-        self._pe_advanced_edit.setVisible(checked)
-
-    def _on_preset_add(self):
-        from analysis_presets import AnalysisPreset
-        name = f"自定义{len(self._presets) + 1}"
-        self._presets[name] = AnalysisPreset(name=name)
-        self._refresh_preset_list()
-        self._preset_list.setCurrentRow(len(self._presets) - 1)
-
-    def _on_preset_duplicate(self):
-        row = self._preset_list.currentRow()
-        if row < 0:
-            return
-        from analysis_presets import AnalysisPreset
-        src = list(self._presets.values())[row]
-        d = src.to_dict()
-        d["name"] = src.name + " (副本)"
-        new_preset = AnalysisPreset.from_dict(d)
-        self._presets[new_preset.name] = new_preset
-        self._refresh_preset_list()
-
-    def _on_preset_delete(self):
-        row = self._preset_list.currentRow()
-        if row < 0:
-            return
-        name = list(self._presets.keys())[row]
-        if self._presets[name].builtin:
-            return
-        del self._presets[name]
-        self._refresh_preset_list()
-        self._save_presets()
-
-    def _on_preset_save(self):
-        row = self._preset_list.currentRow()
-        if row < 0:
-            return
-        old_name = list(self._presets.keys())[row]
-        preset = self._presets[old_name]
-        if preset.builtin:
-            return
-        new_name = self._pe_name.text().strip()
-        preset.name = new_name or old_name
-        preset.role = self._pe_role.text().strip()
-        preset.focus_tags = [tag for tag, cb in self._pe_focus_checks.items() if cb.isChecked()]
-        preset.output_tags = [tag for tag, cb in self._pe_output_checks.items() if cb.isChecked()]
-        preset.extra_instructions = self._pe_extra.toPlainText().strip()
-        preset.cumulative = self._pe_cumulative_check.isChecked()
-        preset.is_advanced = self._pe_advanced_check.isChecked()
-        preset.advanced_prompt = self._pe_advanced_edit.toPlainText().strip()
-        if new_name != old_name:
-            del self._presets[old_name]
-            self._presets[new_name] = preset
-        self._refresh_preset_list()
-        self._save_presets()
-
-    def _save_presets(self):
-        user_presets = [p.to_dict() for p in self._presets.values() if not p.builtin]
-        self._current_settings["analysis_presets"] = user_presets
+    def _on_advisor_changed(self):
+        """Save advisor settings and emit signal to re-init summarizer."""
+        advisors = [k for k, cb in self._advisor_checks.items() if cb.isChecked()]
+        self._current_settings["tip_advisors"] = advisors
+        self._current_settings["summary_extra_instructions"] = self._advisor_extra.toPlainText().strip()
         self._auto_save()
+        self.settings_changed.emit(self._current_settings)
 
-    def get_preset(self, name: str):
-        return self._presets.get(name)
+    def _on_add_custom_advisor(self):
+        name = self._custom_advisor_name.text().strip()
+        desc = self._custom_advisor_desc.text().strip()
+        if not name or not desc:
+            return
+        custom = self._current_settings.get("custom_advisors", {})
+        custom[name] = desc
+        self._current_settings["custom_advisors"] = custom
+        self._custom_advisor_list.addItem(f"{name}: {desc}")
+        self._custom_advisor_name.clear()
+        self._custom_advisor_desc.clear()
+        self._auto_save()
+        self.settings_changed.emit(self._current_settings)
 
-    def get_all_preset_names(self) -> list[str]:
-        return list(self._presets.keys())
+    def _on_delete_custom_advisor(self):
+        row = self._custom_advisor_list.currentRow()
+        if row < 0:
+            return
+        item_text = self._custom_advisor_list.item(row).text()
+        key = item_text.split(":")[0].strip()
+        custom = self._current_settings.get("custom_advisors", {})
+        custom.pop(key, None)
+        self._current_settings["custom_advisors"] = custom
+        self._custom_advisor_list.takeItem(row)
+        self._auto_save()
+        self.settings_changed.emit(self._current_settings)
+
+    def get_tip_advisors(self) -> dict[str, str]:
+        """Build tip_advisors dict from current settings for LiveSummarizer."""
+        result = {}
+        for key, cb in self._advisor_checks.items():
+            if cb.isChecked():
+                result[key] = self._advisor_descriptions.get(key, key)
+        custom = self._current_settings.get("custom_advisors", {})
+        result.update(custom)
+        return result
+
+    def get_extra_instructions(self) -> str:
+        return self._current_settings.get("summary_extra_instructions", "")
 
     # ── Model Management ──
 

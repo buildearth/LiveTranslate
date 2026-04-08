@@ -222,6 +222,13 @@ class LiveTranslateApp:
             self._overlay.set_models(models, active_idx)
 
     def _on_settings_changed(self, settings):
+        # Re-init summarizer if advisor settings changed
+        if "tip_advisors" in settings or "summary_extra_instructions" in settings or "custom_advisors" in settings:
+            if self._panel:
+                active_model = self._panel.get_active_model()
+                if active_model:
+                    self._init_summarizer(active_model)
+                    log.info("LiveSummarizer re-initialized with updated advisor settings")
         # Propagate VAD settings to both channels
         if self._vad_system:
             self._vad_system.update_settings(settings)
@@ -665,8 +672,19 @@ class LiveTranslateApp:
                 kwargs["http_client"] = httpx.Client(proxy=proxy)
 
             llm = ChatOpenAI(**kwargs)
-            config = SummarizerConfig(recent_context_max_items=10)
-            summarizer = LiveSummarizer(llm, config)
+
+            # Get advisor settings from control panel
+            tip_advisors = None
+            extra_instructions = ""
+            if self._panel:
+                tip_advisors = self._panel.get_tip_advisors() or None
+                extra_instructions = self._panel.get_extra_instructions()
+
+            config = SummarizerConfig(
+                recent_context_max_items=10,
+                tip_advisors=tip_advisors,
+            )
+            summarizer = LiveSummarizer(llm, config, extra_instructions=extra_instructions)
 
             session_id = f"live_{time.strftime('%Y%m%d_%H%M%S')}"
             self._summary_bridge.set_summarizer(summarizer, session_id)

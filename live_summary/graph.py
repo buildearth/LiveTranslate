@@ -16,11 +16,12 @@ def build_graph(
     llm: BaseChatModel,
     config: SummarizerConfig | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    extra_instructions: str = "",
 ) -> CompiledStateGraph:
     """构建 LangGraph 状态图"""
     config = config or SummarizerConfig()
 
-    llm_decide = make_llm_decide(llm, tip_advisors=config.tip_advisors)
+    llm_decide = make_llm_decide(llm, tip_advisors=config.tip_advisors, extra_instructions=extra_instructions)
     sync_graphiti = make_sync_graphiti(graphiti_uri=config.graphiti_uri)
 
     builder = StateGraph(StreamState)

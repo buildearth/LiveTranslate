@@ -44,12 +44,17 @@ def _extract_json(text: str) -> dict:
 def make_llm_decide(
     llm: BaseChatModel,
     tip_advisors: dict[str, str] | None = None,
+    extra_instructions: str = "",
 ) -> Callable[[StreamState], dict]:
     """Factory: create llm_decide node, closure captures llm and tip_advisors."""
     advisors = tip_advisors or TIP_ADVISORS
+    _extra = extra_instructions
 
     def llm_decide(state: StreamState) -> dict:
-        prompt = build_prompt(state, advisors) + _JSON_SCHEMA_INSTRUCTION
+        prompt = build_prompt(state, advisors)
+        if _extra:
+            prompt += f"\n\n## 额外指令\n{_extra}"
+        prompt += _JSON_SCHEMA_INSTRUCTION
         response = llm.invoke(prompt)
         raw = response.content if hasattr(response, "content") else str(response)
         data = _extract_json(raw)

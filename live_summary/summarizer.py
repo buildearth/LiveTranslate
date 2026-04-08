@@ -25,9 +25,11 @@ class LiveSummarizer:
         llm: BaseChatModel,
         config: SummarizerConfig | None = None,
         checkpointer: BaseCheckpointSaver | None = None,
+        extra_instructions: str = "",
     ):
         self._config = config or SummarizerConfig()
-        self.graph = build_graph(llm, self._config, checkpointer)
+        self._extra_instructions = extra_instructions
+        self.graph = build_graph(llm, self._config, checkpointer, extra_instructions=extra_instructions)
 
     def summarize(self, session_id: str, messages: list[Message]) -> SummaryOutput:
         """核心方法：输入新对话，返回更新后的总结"""
